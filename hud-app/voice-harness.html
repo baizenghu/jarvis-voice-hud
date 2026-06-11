@@ -128,9 +128,20 @@ async function speak(text) {
   const syn = await rpc("voice.synthesize", { text });
   if (syn.error) { log("TTS error: " + syn.error.message); return; }
   const bytes = Uint8Array.from(atob(syn.result.audio), (c) => c.charCodeAt(0));
+  log("got " + bytes.length + " bytes of audio (" + syn.result.mime + ")");
   const url = URL.createObjectURL(new Blob([bytes], { type: syn.result.mime }));
-  await new Audio(url).play();
-  log("playing ▶");
+  const audio = new Audio(url);
+  try {
+    await audio.play();
+    log("playing ▶ (听到声音了吗?没有就看下面的手动播放按钮 / 检查音量)");
+  } catch (e) {
+    // Autoplay blocked — surface a manual play button so the user can click.
+    log("自动播放被浏览器拦截 (" + e.name + ") — 点下面的按钮播放 👇");
+    const b = document.createElement("button");
+    b.textContent = "▶ 播放回复";
+    b.onclick = () => { audio.play(); };
+    document.body.appendChild(b);
+  }
 }
 
 // Echo mode: record → transcribe → speak the transcript back. No LLM needed —
