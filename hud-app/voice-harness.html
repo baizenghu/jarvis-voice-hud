@@ -30,9 +30,11 @@ const pending = new Map();          // rid -> resolve
 let replyText = "", awaitingReply = false, replyDone = null;
 
 function connect() {
+  log("connecting " + WS_URL + " …");
   ws = new WebSocket(WS_URL);
   ws.onopen = () => log("WS connected");
-  ws.onclose = () => log("WS closed");
+  ws.onclose = (e) => log("WS closed (code " + e.code + ")");
+  ws.onerror = () => log("WS ERROR — 若是 wss 证书问题,先在浏览器单独打开 " + location.origin + " 接受证书");
   ws.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.id && pending.has(msg.id)) {           // RPC response
@@ -68,15 +70,28 @@ async function ensureSession() {
 }
 
 // ---- recording ----
-let mediaRecorder, chunks = [];
+let mediaRecorder, chunks = [], recMime = "audio/webm";
+let recording = false;
 
 async function startRec() {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    log("ERROR: 此页面非安全上下文,浏览器不提供麦克风。确认地址是 https:// 或 localhost"); return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    log("麦克风获取失败: " + e.name + " — " + e.message); return;
+  }
+  const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm"
+             : MediaRecorder.isTypeSupported("audio/ogg") ? "audio/ogg" : "";
+  if (!mime) { log("ERROR: 浏览器不支持 webm/ogg 录制"); stream.getTracks().forEach(t=>t.stop()); return; }
+  recMime = mime;
   chunks = [];
-  mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+  mediaRecorder = new MediaRecorder(stream, { mimeType: mime });
   mediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   mediaRecorder.start();
-  log("recording…");
+  log("recording… (" + mime + ")");
 }
 
 function blobToBase64(blob) {
@@ -89,15 +104,21 @@ function blobToBase64(blob) {
 
 // Stop the recorder and return the transcript (or "" if no speech).
 async function stopAndTranscribe() {
+  if (!mediaRecorder || mediaRecorder.state === "inactive") {
+    log("(没有进行中的录音 — 麦克风可能未启动)"); return "";
+  }
   const done = new Promise((res) => (mediaRecorder.onstop = res));
   mediaRecorder.stop();
   mediaRecorder.stream.getTracks().forEach((t) => t.stop());
   await done;
 
-  const blob = new Blob(chunks, { type: "audio/webm" });
+  const blob = new Blob(chunks, { type: recMime });
+  log("captured " + blob.size + " bytes");
+  if (!blob.size) { log("(录到 0 字节 — 按住时间太短或麦克风静音)"); return ""; }
   const audio = await blobToBase64(blob);
   log("transcribing…");
-  const tr = await rpc("voice.transcribe", { audio, mime: "audio/webm" });
+  const tr = await rpc("voice.transcribe", { audio, mime: recMime });
+  if (tr.error) { log("STT error: " + tr.error.message); return ""; }
   return (tr.result && tr.result.text) || "";
 }
 
@@ -138,13 +159,13 @@ async function runFull() {
   await speak(replyText);
 }
 
-const echoBtn = document.getElementById("echo");
-echoBtn.addEventListener("mousedown", startRec);
-echoBtn.addEventListener("mouseup", runEcho);
-
-const recBtn = document.getElementById("rec");
-recBtn.addEventListener("mousedown", startRec);
-recBtn.addEventListener("mouseup", runFull);
+function bind(id, runner) {
+  const el = document.getElementById(id);
+  el.addEventListener("mousedown", () => { startRec().catch((e) => log("startRec err: " + e)); });
+  el.addEventListener("mouseup", () => { runner().catch((e) => log("run err: " + (e && e.message || e))); });
+}
+bind("echo", runEcho);
+bind("rec", runFull);
 
 connect();
 </script>
