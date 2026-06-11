@@ -8,6 +8,7 @@
 ## 进行中
 - **当前里程碑(decision 0004):先在这台 Linux 上、浏览器内跑通 Phase 0 + Phase 1。**
   Windows/Tauri(Phase 2)与唤醒词(Phase 3)推迟到 Linux 回路稳定后。
+- **Phase 0 代码已完成**(commits 至 `voice-hud-phase0` 分支):`voice_bytes` 适配 + 两个 RPC + 浏览器 harness,8 个单测全绿,两轮 subagent 审查通过。**仅剩真机端到端实测**(需用户的浏览器+麦克风)未做——通过后即可移入"已完成"。
 
 ## 下一步
 ### Phase 0 —— 服务端语音字节 RPC + 开发验证环
