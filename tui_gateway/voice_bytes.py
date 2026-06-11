@@ -8,7 +8,6 @@ tools/transcription_tools.py and tools/tts_tool.py untouched.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import tempfile
@@ -72,9 +71,8 @@ def synthesize_bytes(text: str) -> Tuple[bytes, str]:
     if not text or not text.strip():
         return b"", ""
 
-    tmp_dir = os.path.join(tempfile.gettempdir(), "hermes_voice")
-    os.makedirs(tmp_dir, exist_ok=True)
-    mp3_path = os.path.join(tmp_dir, f"synth_{os.getpid()}_{id(text)}.mp3")
+    fd, mp3_path = tempfile.mkstemp(suffix=".mp3", prefix="synth_")
+    os.close(fd)  # the TTS engine writes to this path itself
 
     try:
         text_to_speech_tool(text=text, output_path=mp3_path)
