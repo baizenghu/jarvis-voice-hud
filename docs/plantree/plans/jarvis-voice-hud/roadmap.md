@@ -3,12 +3,20 @@
 持久的分期状态。每个阶段实现的架构见 [design.md](design.md)。
 
 ## 已完成
-- _(暂无 —— 设计已成稿,待用户复核)_
+- **Phase 0 —— 语音回路(echo 模式)真机验收通过**(2026-06-11)。代码:`voice_bytes` 适配 +
+  `voice.transcribe`/`voice.synthesize` 两个 RPC + 浏览器 harness + dev_server,8 单测全绿,两轮
+  subagent 审查通过。**真机端到端**:笔记本(WG `10.8.0.3`)经 WireGuard + https(自签证书)连中心
+  `10.8.0.2:40445`,按住 echo 说中文→faster-whisper 转写→**本地 Piper** 合成→浏览器播放,**听到念回**。
+  - 环境决定:TTS 从 edge-tts(连微软云,时好时坏)换成**纯本地 Piper**(`zh_CN-huayan-medium`),稳定。
+  - 远程方案:WG 够到中心 + https 满足浏览器麦克风安全上下文要求(见 decision 0005)。
 
 ## 进行中
-- **当前里程碑(decision 0004):先在这台 Linux 上、浏览器内跑通 Phase 0 + Phase 1。**
-  Windows/Tauri(Phase 2)与唤醒词(Phase 3)推迟到 Linux 回路稳定后。
-- **Phase 0 代码已完成**(commits 至 `voice-hud-phase0` 分支):`voice_bytes` 适配 + 两个 RPC + 浏览器 harness,8 个单测全绿,两轮 subagent 审查通过。**仅剩真机端到端实测**(需用户的浏览器+麦克风)未做——通过后即可移入"已完成"。
+- **当前里程碑(decision 0004):先在这台 Linux 上跑通 Phase 0 + Phase 1。** Phase 0 ✅。
+- **完整对话回路已打通**(2026-06-11):接入 **MiniMax-M2.7**(`provider: custom` → `https://api.minimaxi.com/v1`,
+  key 取自 `~/octopus-slim/.octopus-state/octopus.json` 的 minimax-portal)。WS 网关实测 `session.create` +
+  `prompt.submit` → `message.complete` 返回干净中文(`<think>` 已被 hermes 剥离,不会被 TTS 念出)。
+  即 说话→faster-whisper→MiniMax→Piper 念出 全链路通。**待用户在浏览器「问 hermes」按钮上做真机确认。**
+- 接下来:Phase 1(WebGL HUD)。Windows/Tauri(Phase 2)与唤醒词(Phase 3)仍推迟。
 
 ## 下一步
 ### Phase 0 —— 服务端语音字节 RPC + 开发验证环
