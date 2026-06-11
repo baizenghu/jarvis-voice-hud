@@ -13,11 +13,12 @@
 <body>
   <h1>贾维斯语音回路 · Phase 0 harness</h1>
   <p>WS: <code id="wsurl"></code></p>
-  <button id="rec">按住说话 (hold to talk)</button>
+  <button id="echo">按住说话 · echo(转写→念回,不需 LLM)</button>
+  <button id="rec">按住说话 · 问 hermes(需配置模型)</button>
   <div id="log"></div>
 
 <script>
-const WS_URL = `ws://${location.hostname || "localhost"}:8080/api/ws`;
+const WS_URL = `ws://${location.host || "localhost:8080"}/api/ws`;
 document.getElementById("wsurl").textContent = WS_URL;
 const log = (m) => { document.getElementById("log").textContent += m + "\n"; };
 
@@ -65,7 +66,6 @@ async function ensureSession() {
 
 // ---- recording ----
 let mediaRecorder, chunks = [];
-const btn = document.getElementById("rec");
 
 async function startRec() {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -84,7 +84,8 @@ function blobToBase64(blob) {
   });
 }
 
-async function stopRecAndRun() {
+// Stop the recorder and return the transcript (or "" if no speech).
+async function stopAndTranscribe() {
   const done = new Promise((res) => (mediaRecorder.onstop = res));
   mediaRecorder.stop();
   mediaRecorder.stream.getTracks().forEach((t) => t.stop());
@@ -94,7 +95,33 @@ async function stopRecAndRun() {
   const audio = await blobToBase64(blob);
   log("transcribing…");
   const tr = await rpc("voice.transcribe", { audio, mime: "audio/webm" });
-  const text = tr.result && tr.result.text;
+  return (tr.result && tr.result.text) || "";
+}
+
+// Synthesize text and play it; drives the "speaking" step.
+async function speak(text) {
+  log("synthesizing…");
+  const syn = await rpc("voice.synthesize", { text });
+  if (syn.error) { log("TTS error: " + syn.error.message); return; }
+  const bytes = Uint8Array.from(atob(syn.result.audio), (c) => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: syn.result.mime }));
+  await new Audio(url).play();
+  log("playing ▶");
+}
+
+// Echo mode: record → transcribe → speak the transcript back. No LLM needed —
+// this validates the new voice.transcribe + voice.synthesize round-trip alone.
+async function runEcho() {
+  const text = await stopAndTranscribe();
+  if (!text) { log("(no speech detected)"); return; }
+  log("you: " + text);
+  await speak(text);
+}
+
+// Full mode: record → transcribe → hermes agent turn → speak the reply.
+// Requires a configured model + API key (prompt.submit calls the LLM).
+async function runFull() {
+  const text = await stopAndTranscribe();
   if (!text) { log("(no speech detected)"); return; }
   log("you: " + text);
 
@@ -105,18 +132,17 @@ async function stopRecAndRun() {
   log("thinking…");
   await waitReply;
   log("hermes: " + replyText);
-
-  log("synthesizing…");
-  const syn = await rpc("voice.synthesize", { text: replyText });
-  if (syn.error) { log("TTS error: " + syn.error.message); return; }
-  const bytes = Uint8Array.from(atob(syn.result.audio), (c) => c.charCodeAt(0));
-  const url = URL.createObjectURL(new Blob([bytes], { type: syn.result.mime }));
-  await new Audio(url).play();
-  log("playing reply ▶");
+  await speak(replyText);
 }
 
-btn.addEventListener("mousedown", startRec);
-btn.addEventListener("mouseup", stopRecAndRun);
+const echoBtn = document.getElementById("echo");
+echoBtn.addEventListener("mousedown", startRec);
+echoBtn.addEventListener("mouseup", runEcho);
+
+const recBtn = document.getElementById("rec");
+recBtn.addEventListener("mousedown", startRec);
+recBtn.addEventListener("mouseup", runFull);
+
 connect();
 </script>
 </body>
