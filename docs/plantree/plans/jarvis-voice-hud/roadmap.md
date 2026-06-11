@@ -20,6 +20,8 @@
 - **验收门:** 浏览器录音 → 文本 → agent 回复 → 合成语音,全程在 Linux 上跑通。
 
 ### Phase 1 —— HUD 前端(`hud-app/`)
+- 把 `hud-app/` 搭成 TS 工程(package.json + tsconfig + **flat config `eslint.config.mjs`**,
+  规则见 [topics/frontend-lint.md](topics/frontend-lint.md))。
 - 语音状态机(idle/listening/transcribe/think/speak)。
 - Web Audio 麦克风采集 + VAD + TTS 播放;AnalyserNode 接线。
 - WebGL 贾维斯 HUD,带四种音频反应视觉状态。
