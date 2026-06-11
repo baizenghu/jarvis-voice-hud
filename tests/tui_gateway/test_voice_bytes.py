@@ -73,3 +73,39 @@ def test_transcribe_bytes_unknown_mime_defaults_to_webm(monkeypatch):
     )
     vb.transcribe_bytes(b"x", "application/octet-stream")
     assert seen["suffix"] == ".webm"
+
+
+import base64
+import tui_gateway.server as server
+
+
+def test_rpc_voice_synthesize_returns_base64(monkeypatch):
+    # Handlers import from tui_gateway.voice_bytes at call time, so patch the
+    # name on the voice_bytes module (NOT on server).
+    monkeypatch.setattr(vb, "synthesize_bytes", lambda text: (b"AUDIO", "audio/mpeg"))
+    resp = server.dispatch(
+        {"jsonrpc": "2.0", "id": 1, "method": "voice.synthesize", "params": {"text": "hi"}},
+        None,
+    )
+    assert resp["result"]["mime"] == "audio/mpeg"
+    assert base64.b64decode(resp["result"]["audio"]) == b"AUDIO"
+
+
+def test_rpc_voice_synthesize_requires_text():
+    resp = server.dispatch(
+        {"jsonrpc": "2.0", "id": 2, "method": "voice.synthesize", "params": {"text": ""}},
+        None,
+    )
+    assert "error" in resp
+
+
+def test_rpc_voice_transcribe_returns_text(monkeypatch):
+    monkeypatch.setattr(vb, "transcribe_bytes", lambda audio, mime: "hello")
+    resp = server.dispatch(
+        {
+            "jsonrpc": "2.0", "id": 3, "method": "voice.transcribe",
+            "params": {"audio": base64.b64encode(b"x").decode(), "mime": "audio/webm"},
+        },
+        None,
+    )
+    assert resp["result"]["text"] == "hello"

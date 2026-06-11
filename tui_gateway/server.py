@@ -5239,6 +5239,57 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 5026, str(e))
 
 
+@method("voice.transcribe")
+def _(rid, params: dict) -> dict:
+    """Transcribe browser-captured audio bytes (base64) → text.
+
+    The HUD records the mic locally and sends the bytes here; we reuse the
+    existing STT engine. See tui_gateway/voice_bytes.py.
+    """
+    import base64
+
+    b64 = params.get("audio") or ""
+    mime = params.get("mime") or "audio/webm"
+    if not b64:
+        return _err(rid, 4024, "audio required")
+    try:
+        audio = base64.b64decode(b64)
+    except Exception:
+        return _err(rid, 4025, "audio is not valid base64")
+    try:
+        # Lazy import: optional audio deps must surface at call time, not at
+        # gateway startup (mirrors the existing voice.tts handler).
+        from tui_gateway.voice_bytes import transcribe_bytes
+
+        text = transcribe_bytes(audio, mime)
+        return _ok(rid, {"text": text})
+    except ImportError:
+        return _err(rid, 5029, "voice module not available — install audio dependencies")
+    except Exception as e:
+        return _err(rid, 5029, str(e))
+
+
+@method("voice.synthesize")
+def _(rid, params: dict) -> dict:
+    """Synthesize ``text`` → audio bytes (base64) for the HUD to play."""
+    import base64
+
+    text = params.get("text", "")
+    if not text or not text.strip():
+        return _err(rid, 4026, "text required")
+    try:
+        from tui_gateway.voice_bytes import synthesize_bytes
+
+        audio, mime = synthesize_bytes(text)
+        if not audio:
+            return _err(rid, 5028, "synthesis produced no audio")
+        return _ok(rid, {"audio": base64.b64encode(audio).decode(), "mime": mime})
+    except ImportError:
+        return _err(rid, 5028, "voice module not available")
+    except Exception as e:
+        return _err(rid, 5028, str(e))
+
+
 # ── Methods: insights ────────────────────────────────────────────────
 
 
