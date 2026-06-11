@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>语音回路 harness</title>
+  <style>
+    body { font: 16px system-ui; max-width: 640px; margin: 40px auto; }
+    button { font-size: 18px; padding: 10px 20px; }
+    #log { white-space: pre-wrap; background: #111; color: #0f0; padding: 12px;
+           margin-top: 16px; border-radius: 8px; min-height: 200px; }
+  </style>
+</head>
+<body>
+  <h1>贾维斯语音回路 · Phase 0 harness</h1>
+  <p>WS: <code id="wsurl"></code></p>
+  <button id="rec">按住说话 (hold to talk)</button>
+  <div id="log"></div>
+
+<script>
+const WS_URL = `ws://${location.hostname || "localhost"}:8080/api/ws`;
+document.getElementById("wsurl").textContent = WS_URL;
+const log = (m) => { document.getElementById("log").textContent += m + "\n"; };
+
+let ws, sessionId = null, ridSeq = 1;
+const pending = new Map();          // rid -> resolve
+let replyText = "", awaitingReply = false, replyDone = null;
+
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => log("WS connected");
+  ws.onclose = () => log("WS closed");
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.id && pending.has(msg.id)) {           // RPC response
+      pending.get(msg.id)(msg);
+      pending.delete(msg.id);
+      return;
+    }
+    if (msg.method === "event") {                  // server event
+      const { type, payload } = msg.params;
+      if (type === "message.complete" && awaitingReply) {
+        replyText = (payload && payload.text) || "";
+        awaitingReply = false;
+        if (replyDone) replyDone();
+      }
+    }
+  };
+}
+
+function rpc(method, params) {
+  return new Promise((resolve) => {
+    const id = ridSeq++;
+    pending.set(id, resolve);
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+  });
+}
+
+async function ensureSession() {
+  if (sessionId) return sessionId;
+  const r = await rpc("session.create", { cols: 80 });
+  sessionId = r.result.session_id;
+  log("session: " + sessionId);
+  return sessionId;
+}
+
+// ---- recording ----
+let mediaRecorder, chunks = [];
+const btn = document.getElementById("rec");
+
+async function startRec() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  chunks = [];
+  mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+  mediaRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  mediaRecorder.start();
+  log("recording…");
+}
+
+function blobToBase64(blob) {
+  return new Promise((res) => {
+    const r = new FileReader();
+    r.onloadend = () => res(r.result.split(",")[1]);  // strip data: prefix
+    r.readAsDataURL(blob);
+  });
+}
+
+async function stopRecAndRun() {
+  const done = new Promise((res) => (mediaRecorder.onstop = res));
+  mediaRecorder.stop();
+  mediaRecorder.stream.getTracks().forEach((t) => t.stop());
+  await done;
+
+  const blob = new Blob(chunks, { type: "audio/webm" });
+  const audio = await blobToBase64(blob);
+  log("transcribing…");
+  const tr = await rpc("voice.transcribe", { audio, mime: "audio/webm" });
+  const text = tr.result && tr.result.text;
+  if (!text) { log("(no speech detected)"); return; }
+  log("you: " + text);
+
+  await ensureSession();
+  replyText = ""; awaitingReply = true;
+  const waitReply = new Promise((res) => (replyDone = res));
+  await rpc("prompt.submit", { session_id: sessionId, text });
+  log("thinking…");
+  await waitReply;
+  log("hermes: " + replyText);
+
+  log("synthesizing…");
+  const syn = await rpc("voice.synthesize", { text: replyText });
+  if (syn.error) { log("TTS error: " + syn.error.message); return; }
+  const bytes = Uint8Array.from(atob(syn.result.audio), (c) => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: syn.result.mime }));
+  await new Audio(url).play();
+  log("playing reply ▶");
+}
+
+btn.addEventListener("mousedown", startRec);
+btn.addEventListener("mouseup", stopRecAndRun);
+connect();
+</script>
+</body>
+</html>
