@@ -18,7 +18,10 @@
   <div id="log"></div>
 
 <script>
-const WS_URL = `ws://${location.host || "localhost:8080"}/api/ws`;
+// Follow the page scheme: an https page must use wss:// (a ws:// from https is
+// blocked as mixed content). Served over http://localhost → ws://.
+const WS_PROTO = location.protocol === "https:" ? "wss" : "ws";
+const WS_URL = `${WS_PROTO}://${location.host || "localhost:8765"}/api/ws`;
 document.getElementById("wsurl").textContent = WS_URL;
 const log = (m) => { document.getElementById("log").textContent += m + "\n"; };
 
