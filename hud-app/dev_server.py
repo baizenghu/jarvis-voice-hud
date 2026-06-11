@@ -8,10 +8,13 @@ shipped product (the real client is the Tauri HUD in later phases).
 Run (after `pip install -e ".[voice]" edge-tts` in the project venv):
 
     .venv/bin/python hud-app/dev_server.py
-    # then open http://localhost:8080/ in a browser (localhost = mic allowed)
+    # then open http://localhost:8765/ in a browser (localhost = mic allowed)
+
+Override the port with PORT=... if 8765 is taken.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import uvicorn
@@ -35,4 +38,5 @@ def index() -> FileResponse:
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8080, log_level="warning")
+    port = int(os.environ.get("PORT", "8765"))
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

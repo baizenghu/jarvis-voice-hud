@@ -543,29 +543,31 @@ connect();
 </html>
 ```
 
-- [ ] **Step 2: 起 hermes web 服务(提供 WS)**
+> 环境适配(实测时发现):此机无 `web_dist`(`hermes web` 静态挂载会启动失败)、无 venv、无 LLM key。
+> 因此改用 `hud-app/dev_server.py`(只挂 `/api/ws` + 同源托管 harness,绕开 web_dist),并给 harness 加
+> **echo 模式**(转写→念回,不需 LLM)先验证我们的新代码;完整对话回路待配置模型后再测。依赖装在项目
+> `.venv`:`pip install -e ".[voice]" edge-tts`。
 
-确认已配好至少一个可用的 STT 与 TTS（默认本地 faster-whisper + Edge TTS,无需 key；`hermes doctor` 可查）。然后:
+- [ ] **Step 2: 起 dev 服务(提供 WS + harness 页)**
 
-Run: `python -m hermes_cli.main web --port 8080`
-Expected: 启动日志显示在 8080 监听;`/api/ws` 可用。
+Run: `.venv/bin/python hud-app/dev_server.py`
+Expected: 在 127.0.0.1:8080 监听;`/api/ws` 可用,`/` 返回 harness 页。
 
-- [ ] **Step 3: 起一个静态服务器托管 harness 页**
+- [ ] **Step 3: 浏览器验证(echo 模式,不需 LLM)**
 
-新开一个终端:
+浏览器打开 `http://localhost:8080/`(必须 localhost,否则麦克风权限被拒)。
+按住 **echo** 按钮说一句话(如"你好,贾维斯"),松开。
+Expected(`#log` 依次):`WS connected` → `recording…` → `transcribing…` → `you: …`(你的话)→ `synthesizing…` → `playing ▶`,并**听到**把你的话念回来。
+首次会下载 faster-whisper 模型(~150MB),`transcribing…` 可能停顿一会儿。
 
-Run: `python3 -m http.server 8090 --directory hud-app`
-Expected: 在 8090 提供 `hud-app/` 目录。
+若报错:
+- `(no speech detected)` → STT 没听清;说长一点、靠近麦克风。
+- `TTS error` → 检查 edge-tts(需联网)。
 
-- [ ] **Step 4: 浏览器端到端验证**
+- [ ] **Step 4: 完整对话回路(需配置模型 + key)**
 
-在浏览器打开 `http://localhost:8090/voice-harness.html`(必须是 localhost,否则麦克风权限被拒)。
-按住按钮说一句话(如"用一句话介绍你自己"),松开。
-Expected(`#log` 依次出现):`WS connected` → `recording…` → `transcribing…` → `you: …`(你的话)→ `session: …` → `thinking…` → `hermes: …`(回复)→ `synthesizing…` → `playing reply ▶`,并**听到**合成语音。
-
-若某步报错:
-- `you:` 后为空 / `(no speech detected)` → STT 没听清或未配置;`hermes doctor` 查 STT。
-- `TTS error` → 检查 TTS provider(默认 Edge TTS 需联网)。
+先 `.venv/bin/hermes model` 配一个 provider + key,再用 harness 的 **问 hermes** 按钮。
+Expected:在 echo 各步之上多出 `session: …` → `thinking…` → `hermes: …`(LLM 回复)→ 念出回复。
 
 - [ ] **Step 5: 提交**
 
