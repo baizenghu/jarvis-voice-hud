@@ -10,13 +10,19 @@
   - 环境决定:TTS 从 edge-tts(连微软云,时好时坏)换成**纯本地 Piper**(`zh_CN-huayan-medium`),稳定。
   - 远程方案:WG 够到中心 + https 满足浏览器麦克风安全上下文要求(见 decision 0005)。
 
+## 已完成(续)
+- **完整语音对话链路定稿并真机验收通过**(2026-06-11):
+  - **STT** = faster-whisper `large-v3` + 强制 `zh`,GPU(int8_float16),warm ~0.6s。
+  - **LLM** = MiniMax-M2.7(`provider: custom` → `https://api.minimaxi.com/v1`,key 取自 octopus.json 的 minimax-portal)。
+    WS 网关实测干净中文回复,`<think>` 已被 hermes 剥离。
+  - **TTS** = **CosyVoice 2 + 昊然参考音克隆**(8003 常驻服务,zero-shot,warm ~1.8s)。用户确认"音频很好"。
+  - 备选 TTS 都已配昊然参考音:`gptsovits`(~0.8s,袁华微调权重有偏色)、`f5`(~5s)、`piper`(快但不克隆)。
+  - 桥接脚本:`hud-app/{cosyvoice_server,cosyvoice_say,gptsovits_say,f5_say}.py`;参考音 `hud-app/voices/haoran_ref.wav`。
+  - 远程:笔记本经 WireGuard(`10.8.0.2`)+ https 自签证书访问 dev_server,浏览器麦克风可用。
+
 ## 进行中
-- **当前里程碑(decision 0004):先在这台 Linux 上跑通 Phase 0 + Phase 1。** Phase 0 ✅。
-- **完整对话回路已打通**(2026-06-11):接入 **MiniMax-M2.7**(`provider: custom` → `https://api.minimaxi.com/v1`,
-  key 取自 `~/octopus-slim/.octopus-state/octopus.json` 的 minimax-portal)。WS 网关实测 `session.create` +
-  `prompt.submit` → `message.complete` 返回干净中文(`<think>` 已被 hermes 剥离,不会被 TTS 念出)。
-  即 说话→faster-whisper→MiniMax→Piper 念出 全链路通。**待用户在浏览器「问 hermes」按钮上做真机确认。**
-- 接下来:Phase 1(WebGL HUD)。Windows/Tauri(Phase 2)与唤醒词(Phase 3)仍推迟。
+- **Phase 1 —— 贾维斯 WebGL HUD 视觉**(把测试用的 `voice-harness.html` 升级成真正的 HUD 前端)。
+  Windows/Tauri(Phase 2)与唤醒词(Phase 3)仍推迟。
 
 ## 下一步
 ### Phase 0 —— 服务端语音字节 RPC + 开发验证环
