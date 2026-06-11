@@ -130,17 +130,24 @@ async function speak(text) {
   const bytes = Uint8Array.from(atob(syn.result.audio), (c) => c.charCodeAt(0));
   log("got " + bytes.length + " bytes of audio (" + syn.result.mime + ")");
   const url = URL.createObjectURL(new Blob([bytes], { type: syn.result.mime }));
-  const audio = new Audio(url);
+  // Visible, clickable player — always present, so the user can hit play even
+  // if autoplay is blocked, and can see the audio actually loaded.
+  let player = document.getElementById("player");
+  if (!player) {
+    player = document.createElement("audio");
+    player.id = "player";
+    player.controls = true;
+    player.style.display = "block";
+    player.style.marginTop = "12px";
+    document.body.appendChild(player);
+  }
+  player.onerror = () => log("音频解码失败 (audio element error) — 格式或数据有问题");
+  player.src = url;
   try {
-    await audio.play();
-    log("playing ▶ (听到声音了吗?没有就看下面的手动播放按钮 / 检查音量)");
+    await player.play();
+    log("playing ▶ (听到了吗?没有→点页面上那个播放器的 ▶,或检查音量/输出设备)");
   } catch (e) {
-    // Autoplay blocked — surface a manual play button so the user can click.
-    log("自动播放被浏览器拦截 (" + e.name + ") — 点下面的按钮播放 👇");
-    const b = document.createElement("button");
-    b.textContent = "▶ 播放回复";
-    b.onclick = () => { audio.play(); };
-    document.body.appendChild(b);
+    log("自动播放被拦 (" + e.name + ") — 点页面上那个播放器的 ▶ 手动播放 👇");
   }
 }
 
