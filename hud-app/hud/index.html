@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>Jarvis Voice HUD</title>
+  </head>
+  <body>
+    <canvas id="hud"></canvas>
+    <div id="overlay">
+      <div id="hint">按住屏幕说话</div>
+      <div id="status" data-state="idle">ws: connecting</div>
+      <div id="you" class="line"></div>
+      <div id="reply" class="line"></div>
+      <pre id="log"></pre>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

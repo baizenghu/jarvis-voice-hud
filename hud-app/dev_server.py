@@ -29,10 +29,12 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, WebSocket
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from tui_gateway.ws import handle_ws
 
 HERE = Path(__file__).parent
+DIST = HERE / "hud" / "dist"
 app = FastAPI(title="voice-harness dev server")
 
 
@@ -41,9 +43,24 @@ async def ws(ws: WebSocket) -> None:
     await handle_ws(ws)
 
 
-@app.get("/")
-def index() -> FileResponse:
+# The old Phase 0 harness stays available at /harness as a fallback.
+@app.get("/harness")
+def harness() -> FileResponse:
     return FileResponse(HERE / "voice-harness.html")
+
+
+# Serve the built Jarvis HUD at / when dist/ exists; otherwise fall back to the
+# harness and hint to build. The /api/ws + /harness routes above are registered
+# first, so they win over the StaticFiles mount.
+if DIST.is_dir():
+    app.mount("/", StaticFiles(directory=str(DIST), html=True), name="hud")
+else:
+    print(f"[dev_server] {DIST} not found — serving harness at /. "
+          f"Build the HUD: cd hud-app/hud && npm install && npm run build")
+
+    @app.get("/")
+    def index() -> FileResponse:
+        return FileResponse(HERE / "voice-harness.html")
 
 
 if __name__ == "__main__":

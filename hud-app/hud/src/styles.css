@@ -1,0 +1,80 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: radial-gradient(circle at center, #04121a 0%, #01060a 70%, #000 100%);
+  font: 13px ui-monospace, "SF Mono", Menlo, monospace;
+  color: #7fe3f0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#hud {
+  position: fixed;
+  inset: 0;
+  display: block;
+  cursor: pointer;
+}
+
+#overlay {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  max-width: 60vw;
+  pointer-events: none;
+  text-shadow: 0 0 6px rgba(34, 211, 238, 0.6);
+}
+
+#hint {
+  font-size: 14px;
+  opacity: 0.7;
+  margin-bottom: 6px;
+}
+
+#status {
+  font-size: 11px;
+  opacity: 0.6;
+  margin-bottom: 8px;
+}
+
+#status[data-state="speaking"] {
+  color: #ffce54;
+}
+
+.line {
+  margin: 2px 0;
+  color: #aef2fb;
+  white-space: pre-wrap;
+}
+
+#reply {
+  color: #ffce54;
+}
+
+#log {
+  margin-top: 8px;
+  font-size: 10px;
+  opacity: 0.4;
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+
+.tts-player {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: 240px;
+  opacity: 0.5;
+  pointer-events: auto;
+}
