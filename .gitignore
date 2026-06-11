@@ -71,3 +71,4 @@ result
 website/static/api/skills-index.json
 models-dev-upstream/
 hud-app/.certs/
+hud-app/voices/
