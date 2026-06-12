@@ -849,6 +849,16 @@ WHISPER_HALLUCINATIONS = {
     "amara.org",
     "www.mooji.org",
     "ご視聴ありがとうございました",
+    # Chinese hallucinations (YouTube-subtitle artifacts on silence/unclear audio)
+    "请关注",
+    "请订阅",
+    "谢谢观看",
+    "谢谢大家",
+    "欢迎关注明镜",
+    "明镜需要您的支持,欢迎关注明镜",
+    "明镜需要您的支持，欢迎关注明镜",
+    "明镜与点点栏目",
+    "请不吝点赞 订阅 转发 打赏支持明镜与点点栏目",
 }
 
 # Regex patterns for repetitive hallucinations (e.g. "Thank you. Thank you. Thank you.")

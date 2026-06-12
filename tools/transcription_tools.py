@@ -1133,7 +1133,18 @@ def _transcribe_local(file_path: str, model_name: str) -> Dict[str, Any]:
             or os.getenv(LOCAL_STT_LANGUAGE_ENV)
             or None
         )
-        transcribe_kwargs = {"beam_size": 5}
+        transcribe_kwargs = {
+            "beam_size": 5,
+            # Hallucination suppression — short/quiet clips otherwise produce
+            # canned "subscribe to my channel" style phrases (e.g. Chinese
+            # "欢迎关注明镜"). VAD drops non-speech; the rest steer decoding off
+            # those training-data artifacts.
+            "vad_filter": True,
+            "condition_on_previous_text": False,
+            "temperature": 0.0,
+            "no_speech_threshold": 0.6,
+            "compression_ratio_threshold": 2.4,
+        }
         if _forced_lang:
             transcribe_kwargs["language"] = _forced_lang
 
