@@ -3,6 +3,7 @@
 # CosyVoice3 REQUIRES the "<system>...<|endofprompt|><ref transcript>" prompt
 # format — without it the LLM emits empty output and the vocoder crashes.
 exec env \
+  HOST="${HOST:-0.0.0.0}" \
   COSYVOICE_MODEL_DIR=/home/baizh/CosyVoice/pretrained_models/CosyVoice3-0.5B \
   COSYVOICE_REF_AUDIO=/home/baizh/hermes-agent/hud-app/voices/haoran_ref.wav \
   COSYVOICE_REF_TEXT="You are a helpful assistant.<|endofprompt|>你好,我是昊然,我的声音沉稳自然,语调平和,语速平稳,温润醇厚,兼具温柔与力量,听起来亲切而有信任感。" \

@@ -121,4 +121,4 @@ def tts(req: TTSRequest) -> Response:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="info")
+    uvicorn.run(app, host=os.environ.get("HOST", "127.0.0.1"), port=PORT, log_level="info")
