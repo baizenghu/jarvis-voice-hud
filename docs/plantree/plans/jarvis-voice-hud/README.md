@@ -27,6 +27,7 @@
 | [decisions/0002-shell-and-visuals.md](decisions/0002-shell-and-visuals.md) | Tauri v2 外壳 + WebGL HUD |
 | [decisions/0003-activation-wake-word.md](decisions/0003-activation-wake-word.md) | 唤醒方式 = 喊它名字 |
 | [decisions/0004-linux-first-milestone.md](decisions/0004-linux-first-milestone.md) | 首个里程碑 = 先在 Linux 浏览器内跑通 |
+| [decisions/0005-windows-native-agent-deployment.md](decisions/0005-windows-native-agent-deployment.md) | agent 原生上 Windows 操控本机;STT/TTS 当 Linux API;GUI 用 clawtouch |
 
 ## 已确认约束(来自用户)
 - 最终运行目标:**Windows**(hermes 在 WSL2 里;HUD 连 localhost)。开发机:**Linux**。

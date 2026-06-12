@@ -8,7 +8,7 @@
   subagent 审查通过。**真机端到端**:笔记本(WG `10.8.0.3`)经 WireGuard + https(自签证书)连中心
   `10.8.0.2:40445`,按住 echo 说中文→faster-whisper 转写→**本地 Piper** 合成→浏览器播放,**听到念回**。
   - 环境决定:TTS 从 edge-tts(连微软云,时好时坏)换成**纯本地 Piper**(`zh_CN-huayan-medium`),稳定。
-  - 远程方案:WG 够到中心 + https 满足浏览器麦克风安全上下文要求(见 decision 0005)。
+  - 远程方案:WG 够到中心 + https 自签证书,满足浏览器麦克风安全上下文要求。
 
 ## 已完成(续)
 - **Phase 1 —— 贾维斯环形 HUD 前端落地**(2026-06-11):`hud-app/hud/` Vite+TS 工程,Canvas2D 画
@@ -34,10 +34,16 @@
 > 见 [impl-plan-phase1.md](impl-plan-phase1.md))已完成,移入"已完成"。下面是尚未做的阶段。
 
 ## 下一步
-### Phase 2 —— Tauri 外壳(`hud-shell/`)+ Windows 打包
-- 无边框、透明、置顶、可拖动窗口;托盘;全局热键(开发期兜底)。
-- GitHub Actions 工作流构建 Windows `.exe`。
-- **验收门:** 悬浮 HUD 助手在真实 Windows 目标上运行。
+### Phase 2 —— agent 落地 Windows + 操控本机(架构见 [decisions/0005](decisions/0005-windows-native-agent-deployment.md))
+**方向变更**:不再是"Windows 只做瘦 HUD",而是**贾维斯要操作这台 Windows 的文件和界面**,所以
+**hermes 原生装 Windows**(已确认支持,无需 WSL),STT/TTS 留 Linux 中心当 HTTP API,GUI 自动化用
+clawtouch(Pico HID + 本地 stdio MCP)。目标机已探明:Win11 24H2、原生 Python 有、WSL 没装、局域网通。
+- **2a 文件/命令档**:Linux 把 CosyVoice 绑局域网 + whisper 包 HTTP API → Windows 装 hermes(`install.ps1`)
+  + 配模型/STT/TTS 指向中心 → 跑通"Windows hermes + 远程语音 + 本机文件/命令"。
+- **2b GUI 档**(需硬件 Pico 2):Windows 装 `clawtouch-mcp` + 刷 `clawtouch-hid`,hermes 本地 MCP 接入,
+  `clawtouch-skills` 进 skills → 贾维斯能看屏 + 点击操作 Windows。
+- **2c 视觉壳**:Tauri 无边框置顶悬浮窗(原 Phase 2),本地连 Windows hermes;GitHub Actions 出 `.exe`。
+- **验收门:** 在 Windows 上喊话 → 远程转写 → MiniMax → 远程合成念回;且能让贾维斯读写本机文件、操作界面。
 
 ### Phase 3 —— 唤醒词(喊它名字)—— 已确认
 喊出助手名字唤醒是核心交互(decision 0003),非可选项。
