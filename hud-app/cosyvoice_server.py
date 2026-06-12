@@ -73,12 +73,11 @@ class TTSRequest(BaseModel):
 def _load() -> None:
     global _model
     t0 = time.time()
-    log.info("loading CosyVoice2 from %s ...", MODEL_DIR)
+    log.info("loading CosyVoice from %s ...", MODEL_DIR)
     _model = AutoModel(model_dir=MODEL_DIR, fp16=True)
-    # Pre-register the zero-shot speaker so per-utterance calls skip prompt
-    # embedding extraction.
-    ok = _model.add_zero_shot_spk(REF_TEXT, REF_AUDIO, SPK_ID)
-    assert ok is True, "add_zero_shot_spk failed"
+    # Standard zero-shot path: pass ref text + ref audio PATH per call (this
+    # frontend's _extract_speech_feat re-loads the path itself). The cached
+    # add_zero_shot_spk path produces degenerate output on CosyVoice3.
     log.info(
         "model ready in %.1fs (sample_rate=%d, ref=%s)",
         time.time() - t0, _model.sample_rate, REF_AUDIO,
@@ -104,7 +103,7 @@ def tts(req: TTSRequest) -> Response:
     # model hallucinates on. Pass the full text; it yields one chunk per
     # internal segment, which we concatenate.
     for out in _model.inference_zero_shot(
-        text, "", "", zero_shot_spk_id=SPK_ID, stream=False
+        text, REF_TEXT, REF_AUDIO, stream=False
     ):
         chunks.append(out["tts_speech"])
     audio = torch.concat(chunks, dim=1) if chunks else torch.zeros(1, 1)
