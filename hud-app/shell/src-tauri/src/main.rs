@@ -6,16 +6,17 @@ use tauri::{
     WebviewUrl, WebviewWindowBuilder,
 };
 
-// 运行期注入:① 透明背景(透出桌面);② 全窗拖拽区(M1 无 canvas 交互)。
-// hud 工程零改动 —— 注入发生在 webview 初始化时,不碰 dist 文件。
+// 运行期注入:① 本机网关 WS 地址(tauri:// 协议下前端推不出端口);② 透明背景(透出桌面);
+// ③ 全窗拖拽区(z 1000,低于 #ask 输入框的 10000,输入框可点)。
 const INIT_SCRIPT: &str = r#"
+window.__JARVIS_WS_URL__ = 'ws://127.0.0.1:8765/api/ws';
 window.addEventListener('DOMContentLoaded', () => {
   const s = document.createElement('style');
   s.textContent = 'html,body,#hud{background:transparent !important;}';
   document.head.appendChild(s);
   const drag = document.createElement('div');
   drag.setAttribute('data-tauri-drag-region', '');
-  drag.style.cssText = 'position:fixed;inset:0;z-index:2147483647;';
+  drag.style.cssText = 'position:fixed;inset:0;z-index:1000;';
   document.body.appendChild(drag);
 });
 "#;

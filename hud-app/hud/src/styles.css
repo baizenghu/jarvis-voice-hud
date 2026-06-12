@@ -70,6 +70,26 @@ body {
   line-height: 1.4;
 }
 
+#ask {
+  position: fixed;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  width: 70%;
+  padding: 6px 10px;
+  z-index: 10000; /* above the Tauri shell's drag overlay (z 1000) */
+  background: rgba(4, 18, 26, 0.75);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  border-radius: 14px;
+  color: #aef2fb;
+  font: inherit;
+  outline: none;
+}
+
+#ask::placeholder {
+  color: rgba(127, 227, 240, 0.4);
+}
+
 .tts-player {
   position: fixed;
   right: 16px;

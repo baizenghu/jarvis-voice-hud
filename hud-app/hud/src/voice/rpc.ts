@@ -22,7 +22,13 @@ export type RpcStatus = "connecting" | "open" | "closed" | "error";
 
 // Build the WS URL following the page scheme: an https page must use wss://
 // (a ws:// from https is blocked as mixed content).
+// `window.__JARVIS_WS_URL__` overrides — the Tauri shell injects it because under
+// the tauri:// protocol location.host has no usable port.
 export function wsUrl(): string {
+  const override = (window as { __JARVIS_WS_URL__?: string }).__JARVIS_WS_URL__;
+  if (override) {
+    return override;
+  }
   const proto = location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${location.host || "localhost:8765"}/api/ws`;
 }
