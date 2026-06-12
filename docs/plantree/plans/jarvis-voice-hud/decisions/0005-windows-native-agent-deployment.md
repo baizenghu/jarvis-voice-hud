@@ -2,6 +2,15 @@
 
 日期:2026-06-11。状态:已采纳(待实施)。
 
+## 机器清单(避免与早期 echo 测试机混淆)
+| 机器 | 位置 | 地址 | 角色 |
+|---|---|---|---|
+| Linux 中心(本机) | 公司 | LAN `192.168.0.7` / WG `10.8.0.2` | GPU:STT/TTS + 当前 hermes |
+| **Windows 笔记本** | 公司(与中心同 LAN) | `192.168.0.3` | 本决策的部署目标:装 hermes、操控本机、clawtouch GUI |
+| 另一台 Linux 笔记本 | 异地 | WG `10.8.0.3` | 早期 echo 真机测试用,**不参与** Windows 部署 |
+
+> Windows 与中心**同公司局域网** → `Windows hermes → 中心 STT/TTS` 是局域网直连(ping 4ms),不走 WG。
+
 ## 背景
 最初(decision 0001)把音频放前端、agent + STT/TTS 全放 Linux 中心,Windows 只做瘦 HUD。
 但需求升级:**贾维斯要能访问 Windows 上的文件、并操控这台 Windows**(文件/命令 + GUI 自动化)。
