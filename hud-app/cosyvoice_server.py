@@ -94,6 +94,16 @@ def tts(req: TTSRequest) -> Response:
     text = (req.text or "").strip()
     if not text:
         return Response(content=b"", status_code=400)
+    # Too-short text poisons the model: the request itself may return 200, but
+    # every subsequent inference then fails in token2wav ("Kernel size can't be
+    # greater than actual input size") until restart. Punctuation padding does
+    # NOT help (tested: "好的。"=2 speakable chars is safe, "嗯。"=1 poisons) —
+    # what matters is speakable characters, so double a single-char utterance.
+    speakable = sum(1 for c in text if c.isalnum())
+    if speakable == 0:
+        return Response(content=b"", status_code=400)
+    if speakable == 1:
+        text = text + text
     t0 = time.time()
     chunks = []
     # Do NOT pre-split externally — CosyVoice's own frontend normalizes numbers

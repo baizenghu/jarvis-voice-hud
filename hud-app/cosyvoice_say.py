@@ -39,11 +39,6 @@ def main() -> int:
         text = f.read().strip()
     if not text:
         return 0
-    # CosyVoice3 vocoder needs a minimum input length — very short text ("好的。")
-    # crashes token2wav with "Kernel size can't be greater than actual input size".
-    # Pad with a trailing clause; the extra period only adds a brief pause.
-    if len(text) < 6:
-        text = text + "。。"
 
     body = json.dumps({"text": text}).encode("utf-8")
     req = urllib.request.Request(
