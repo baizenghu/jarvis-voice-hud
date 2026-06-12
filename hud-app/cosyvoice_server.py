@@ -98,22 +98,11 @@ def tts(req: TTSRequest) -> Response:
         return Response(content=b"", status_code=400)
     t0 = time.time()
     chunks = []
-    # CosyVoice both (a) truncates multi-sentence input in one inference call
-    # and (b) repeats/garbles long comma-heavy clauses (esp. with numbers).
-    # Fix: split on sentence enders; further break any segment longer than
-    # ~18 chars on commas so each synthesized chunk is short and clean. Then
-    # concatenate — the whole reply is spoken, without repetition.
-    segments = []
-    for sent in re.split(r"(?<=[。！？；!?;\n])", text):
-        sent = sent.strip()
-        if not sent:
-            continue
-        if len(sent) <= 18:
-            segments.append(sent)
-        else:
-            segments.extend(
-                p.strip() for p in re.split(r"(?<=[，,、])", sent) if p.strip()
-            )
+    # CosyVoice truncates multi-sentence input in one inference call, so split
+    # on sentence-ending punctuation only and synthesize each, then concat.
+    # NOTE: do NOT split finer than sentences — very short fragments make the
+    # zero-shot model hallucinate extra audio.
+    segments = [s.strip() for s in re.split(r"(?<=[。！？!?\n])", text) if s.strip()]
     if not segments:
         segments = [text]
     # zero_shot with cached spk: prompt_text/prompt_wav empty, use spk id.
