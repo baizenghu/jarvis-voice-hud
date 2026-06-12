@@ -26,6 +26,7 @@ import io
 import logging
 import os
 import sys
+import threading
 import time
 
 REPO = "/home/baizh/CosyVoice"
@@ -89,6 +90,13 @@ def health() -> dict:
     return {"ok": _model is not None, "sample_rate": getattr(_model, "sample_rate", None)}
 
 
+# The model is NOT thread-safe: FastAPI sync endpoints run in a threadpool, and
+# concurrent inferences corrupt model state (every later request then fails in
+# token2wav until restart — observed 2026-06-12 when three HUD clients went
+# live). Serialize all inference.
+_infer_lock = threading.Lock()
+
+
 @app.post("/tts")
 def tts(req: TTSRequest) -> Response:
     text = (req.text or "").strip()
@@ -112,10 +120,11 @@ def tts(req: TTSRequest) -> Response:
     # and produced fragments shorter than 0.5*prompt_text, which the zero-shot
     # model hallucinates on. Pass the full text; it yields one chunk per
     # internal segment, which we concatenate.
-    for out in _model.inference_zero_shot(
-        text, REF_TEXT, REF_AUDIO, stream=False
-    ):
-        chunks.append(out["tts_speech"])
+    with _infer_lock:
+        for out in _model.inference_zero_shot(
+            text, REF_TEXT, REF_AUDIO, stream=False
+        ):
+            chunks.append(out["tts_speech"])
     audio = torch.concat(chunks, dim=1) if chunks else torch.zeros(1, 1)
     buf = io.BytesIO()
     torchaudio.save(buf, audio, _model.sample_rate, format="wav")
