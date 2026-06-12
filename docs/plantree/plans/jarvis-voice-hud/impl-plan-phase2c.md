@@ -26,7 +26,7 @@ Windows(192.168.0.3):
     缺了**静默失败**(不报错、就是拖不动)→ `src-tauri/capabilities/default.json`。
   - 仓库 `.gitignore` 全局忽略 `docs/superpowers/*`,spec/plan 留本地不进 git。
 
-## M2 —— 接本机 hermes,文字往返(设计已定,待实现)
+## M2 —— ✅ 完成(2026-06-12,真机验收过):接本机 hermes,文字往返
 **目标**:小球旁有输入框,回车 → `prompt.submit` → MiniMax 回复显示在 HUD 上;小球状态动效随
 thinking/回复切换。不碰麦克风/STT/TTS。
 
@@ -54,9 +54,18 @@ D:\hermes-agent-main\venv\Scripts\python.exe D:\hermes-dev\hud-app\dev_server.py
 **风险**:`/api/ws` 的 `prompt.submit`/`message.complete` 在 Windows hermes 上没实测过(Phase 2a 只验了
 `hermes -z`)——M2 第一步先用 wscat/python 脚本裸测网关,再动前端。
 
-## M3 —— 全语音回路(未开始)
-按住说话 → `voice.transcribe`(网关代理中心 :8010)→ prompt → `voice.synthesize`(:8003)→ 播放。
-已知坑:WebView2 `getUserMedia` 权限;M1 全窗拖拽层会挡 canvas 按住事件,届时改拖拽区域。
+## M3 —— ✅ 完成(2026-06-12,真机验收过):全语音回路
+按住小球说话 → `voice.transcribe` → prompt → `voice.synthesize` → 播放,真机全通(commit `11528dc`,M2 为 `30e90f5`)。
+实现要点与踩坑:
+- **上游 hermes 缺 `voice.*` RPC**(fork 才有)→ `gateway_voice_patch.py` + `voice_bytes_vendored.py`
+  在 dev_server 启动时注册(fork 上 no-op),不动 D 盘上游源码。
+- **重大发现:hermes `tts_tool` 的 command 型 provider 走 cmd(`shell=True`),不走 Git Bash**——
+  Phase 2a 的 bash env 语法 TTS 配置从未真正通过 tts_tool 跑通(当时是手动 Git Bash 验的)。
+  修复:`cosyvoice_say.py` 自带 ProxyHandler({}) 绕代理 + 第 3 参数传 API 地址,
+  `D:\hermes-home\config.yaml` 的 command 改纯 cmd 语法;`HERMES_GIT_BASH_PATH` 只服务 agent shell 工具。
+- 拖拽区从全窗改顶部 48px 窄条,中心区留给按住说话。
+- 网关裸测脚本:`ws_smoke.py`(文字)、`ws_voice_smoke.py`(合成→转写照妖镜),先裸测再动前端。
+- 中心 whisper :8010 需在跑(`HOST=0.0.0.0 PORT=8010 nohup .venv/bin/python hud-app/whisper_api.py &`)。
 
 ## M4 —— 打包(未开始)
 `tauri build` 出 `.exe`(bundle.active 改回 true,target nsis/msi)+ 开机自启;贾维斯专属图标。
