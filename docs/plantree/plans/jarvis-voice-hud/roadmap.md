@@ -11,37 +11,29 @@
   - 远程方案:WG 够到中心 + https 满足浏览器麦克风安全上下文要求(见 decision 0005)。
 
 ## 已完成(续)
-- **完整语音对话链路定稿并真机验收通过**(2026-06-11):
-  - **STT** = faster-whisper `large-v3` + 强制 `zh`,GPU(int8_float16),warm ~0.6s。
-  - **LLM** = MiniMax-M2.7(`provider: custom` → `https://api.minimaxi.com/v1`,key 取自 octopus.json 的 minimax-portal)。
-    WS 网关实测干净中文回复,`<think>` 已被 hermes 剥离。
-  - **TTS** = **CosyVoice 2 + 昊然参考音克隆**(8003 常驻服务,zero-shot,warm ~1.8s)。用户确认"音频很好"。
-  - 备选 TTS 都已配昊然参考音:`gptsovits`(~0.8s,袁华微调权重有偏色)、`f5`(~5s)、`piper`(快但不克隆)。
-  - 桥接脚本:`hud-app/{cosyvoice_server,cosyvoice_say,gptsovits_say,f5_say}.py`;参考音 `hud-app/voices/haoran_ref.wav`。
-  - 远程:笔记本经 WireGuard(`10.8.0.2`)+ https 自签证书访问 dev_server,浏览器麦克风可用。
+- **Phase 1 —— 贾维斯环形 HUD 前端落地**(2026-06-11):`hud-app/hud/` Vite+TS 工程,Canvas2D 画
+  旋转弧环 + 中心声纹核 + 四状态音频动效;语音 TS 模块(rpc/audio/machine);dev_server 托管 dist。
+- **完整语音对话链路定稿(经一整天 TTS/STT/前端调稳)**(2026-06-11):
+  - **STT** = faster-whisper `large-v3` + 强制 `zh`,GPU,warm ~0.6s;**加 VAD + `condition_on_previous_text=False`
+    + `temperature=0` 抑制幻觉**(原会凭空吐"欢迎关注明镜");中文幻觉词加进过滤名单。
+  - **LLM** = **MiniMax-M3 + 关思考**(`custom_providers[].extra_body` 透传 `thinking:{type:disabled}`;
+    M2.x 关不掉只有 M3 行),warm ~2.5s;SOUL 人设收紧为"短句、禁顿号列举"。
+  - **TTS** = **CosyVoice3-0.5B + 昊然参考音克隆**(从 CosyVoice2 升级——v2 小模型长句/顿号/数字会
+    乱码/截断/泄漏参考文本;v3 RL 后训练治稳)。**关键**:v3 参考文本必须 `<|endofprompt|>` 格式、
+    用非缓存 zero-shot 路径。启动脚本 `hud-app/start_cosyvoice.sh`。
+  - **前端修复**:`analyser` 曾连扬声器致麦克风声学反馈污染"第二轮起"录音 → 改为 analyser 只取数、
+    TTS 单独连 destination。
+  - 备选 TTS 桥接都在(各有取舍):`gptsovits`/`f5`/`indextts`/`voxcpm`/`piper`;参考音 `hud-app/voices/haoran_ref.wav`。
+  - 用照妖镜(合成→ASR 转写回比对)逐句验过稳定性。完整踩坑见笔记 `mynotebook/语音助手-贾维斯/2026-06-11-语音HUD-TTS-STT-WebAudio踩坑总结.md`。
+- **代码已合并到 `main`**(2026-06-11);备份 tag `pre-hermes-upgrade` + 分支 `backup-voice-hud-phase0`。
 
 ## 进行中
-- **Phase 1 —— 贾维斯 WebGL HUD 视觉**(把测试用的 `voice-harness.html` 升级成真正的 HUD 前端)。
-  Windows/Tauri(Phase 2)与唤醒词(Phase 3)仍推迟。
+- _(无 —— Phase 0/1 + 语音链路定稿均完成并合并 main;下一步是延后的 Phase 2/3)_
+
+> Phase 0(语音字节 RPC,见 [impl-plan-phase0.md](impl-plan-phase0.md))与 Phase 1(环形 HUD 前端,
+> 见 [impl-plan-phase1.md](impl-plan-phase1.md))已完成,移入"已完成"。下面是尚未做的阶段。
 
 ## 下一步
-### Phase 0 —— 服务端语音字节 RPC + 开发验证环
-> 可执行实施计划:[impl-plan-phase0.md](impl-plan-phase0.md)(逐任务、TDD、含浏览器 harness)。
-- 在 `tui_gateway/server.py` 增加 `voice.transcribe`(音频字节→文本)和 `voice.synthesize`
-  (文本→音频字节),通过一个薄适配模块委托给现有 STT/TTS 引擎。
-- 用一个 fixture WAV + 一段短文本做单测。
-- 一个临时 HTML 页面,在 Linux 浏览器里跑通回路。
-- **验收门:** 浏览器录音 → 文本 → agent 回复 → 合成语音,全程在 Linux 上跑通。
-
-### Phase 1 —— HUD 前端(`hud-app/`)
-- 把 `hud-app/` 搭成 TS 工程(package.json + tsconfig + **flat config `eslint.config.mjs`**,
-  规则见 [topics/frontend-lint.md](topics/frontend-lint.md))。
-- 语音状态机(idle/listening/transcribe/think/speak)。
-- Web Audio 麦克风采集 + VAD + TTS 播放;AnalyserNode 接线。
-- WebGL 贾维斯 HUD,带四种音频反应视觉状态。
-- 点击/热键唤醒(开发期)。先跑在普通浏览器里(尚无外壳)。
-- **验收门:** 用真实 HUD 在浏览器里(Linux)跑通完整语音回路。
-
 ### Phase 2 —— Tauri 外壳(`hud-shell/`)+ Windows 打包
 - 无边框、透明、置顶、可拖动窗口;托盘;全局热键(开发期兜底)。
 - GitHub Actions 工作流构建 Windows `.exe`。
