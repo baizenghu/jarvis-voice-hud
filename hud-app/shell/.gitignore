@@ -1,0 +1,4 @@
+node_modules/
+src-tauri/target/
+# Tauri generated artifacts (regenerated on each build)
+src-tauri/gen/schemas/

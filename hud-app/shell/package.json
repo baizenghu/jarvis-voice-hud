@@ -1,0 +1,14 @@
+{
+  "name": "jarvis-hud-shell",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Jarvis floating voice HUD — Tauri shell (M1 skeleton)",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}
