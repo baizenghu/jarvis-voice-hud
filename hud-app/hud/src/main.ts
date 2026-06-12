@@ -75,7 +75,7 @@ async function endTurn(): Promise<void> {
 
     log("thinking…");
     const reply = await rpc.submitPrompt(text);
-    replyEl.textContent = `hermes: ${reply}`;
+    replyEl.textContent = `Jarvis: ${reply}`;
     machine.send("REPLIED"); // → speaking
 
     log("synthesizing…");
