@@ -132,8 +132,13 @@ export class AudioEngine {
 
       const ctx = this.ensureCtx();
       this.mediaSource = ctx.createMediaElementSource(el);
+      // Tap TTS for the analyser (visuals) AND route TTS to the speakers.
+      // CRITICAL: the analyser must NEVER connect to ctx.destination — the mic
+      // also feeds the analyser, so analyser→destination would monitor the mic
+      // out the speakers, causing acoustic feedback that corrupts every
+      // recording after the first TTS playback.
       this.mediaSource.connect(this.analyser!);
-      this.analyser!.connect(ctx.destination); // route TTS to speakers
+      this.mediaSource.connect(ctx.destination);
     }
     return this.player;
   }
