@@ -34,6 +34,15 @@ from fastapi.staticfiles import StaticFiles
 from tui_gateway.ws import handle_ws
 
 HERE = Path(__file__).parent
+
+# Upstream hermes installs lack the voice byte RPCs this fork adds — register
+# them at startup (no-op on the fork). Vendored deps live next to this file.
+import sys as _sys
+
+_sys.path.insert(0, str(HERE))
+import gateway_voice_patch
+
+gateway_voice_patch.register()
 DIST = HERE / "hud" / "dist"
 app = FastAPI(title="voice-harness dev server")
 

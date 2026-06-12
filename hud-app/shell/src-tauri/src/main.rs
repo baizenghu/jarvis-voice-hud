@@ -7,7 +7,7 @@ use tauri::{
 };
 
 // 运行期注入:① 本机网关 WS 地址(tauri:// 协议下前端推不出端口);② 透明背景(透出桌面);
-// ③ 全窗拖拽区(z 1000,低于 #ask 输入框的 10000,输入框可点)。
+// ③ 顶部窄条拖拽区(M3:中心区留给"按住小球说话"的 canvas 事件,不能整窗覆盖)。
 const INIT_SCRIPT: &str = r#"
 window.__JARVIS_WS_URL__ = 'ws://127.0.0.1:8765/api/ws';
 window.addEventListener('DOMContentLoaded', () => {
@@ -16,7 +16,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.head.appendChild(s);
   const drag = document.createElement('div');
   drag.setAttribute('data-tauri-drag-region', '');
-  drag.style.cssText = 'position:fixed;inset:0;z-index:1000;';
+  drag.style.cssText = 'position:fixed;top:0;left:0;right:0;height:48px;z-index:1000;cursor:move;';
   document.body.appendChild(drag);
 });
 "#;
