@@ -25,7 +25,6 @@ Env overrides:
 import io
 import logging
 import os
-import re
 import sys
 import time
 
@@ -98,19 +97,16 @@ def tts(req: TTSRequest) -> Response:
         return Response(content=b"", status_code=400)
     t0 = time.time()
     chunks = []
-    # CosyVoice truncates multi-sentence input in one inference call, so split
-    # on sentence-ending punctuation only and synthesize each, then concat.
-    # NOTE: do NOT split finer than sentences — very short fragments make the
-    # zero-shot model hallucinate extra audio.
-    segments = [s.strip() for s in re.split(r"(?<=[。！？!?\n])", text) if s.strip()]
-    if not segments:
-        segments = [text]
-    # zero_shot with cached spk: prompt_text/prompt_wav empty, use spk id.
-    for seg in segments:
-        for out in _model.inference_zero_shot(
-            seg.strip(), "", "", zero_shot_spk_id=SPK_ID, stream=False
-        ):
-            chunks.append(out["tts_speech"])
+    # Do NOT pre-split externally — CosyVoice's own frontend normalizes numbers
+    # and splits the text (we tuned its zh split to token_max_n=50/token_min_n=30
+    # /comma_split=True for stability). External splitting fought that pipeline
+    # and produced fragments shorter than 0.5*prompt_text, which the zero-shot
+    # model hallucinates on. Pass the full text; it yields one chunk per
+    # internal segment, which we concatenate.
+    for out in _model.inference_zero_shot(
+        text, "", "", zero_shot_spk_id=SPK_ID, stream=False
+    ):
+        chunks.append(out["tts_speech"])
     audio = torch.concat(chunks, dim=1) if chunks else torch.zeros(1, 1)
     buf = io.BytesIO()
     torchaudio.save(buf, audio, _model.sample_rate, format="wav")
