@@ -1,6 +1,6 @@
 # 路线图:贾维斯语音 HUD
 
-> 🚀 **NEW SESSION 入口**:先读最新交接 [HANDOFF-2026-06-12-windows-d盘源码部署.md](HANDOFF-2026-06-12-windows-d盘源码部署.md)
+> 🚀 **NEW SESSION 入口**:先读最新交接 [HANDOFF-2026-06-12-2c悬浮小球三里程碑.md](HANDOFF-2026-06-12-2c悬浮小球三里程碑.md)
 > ——贾维斯已迁 Windows D 盘源码版,Phase 2a 全过;**2c M1+M2+M3 已真机验收(悬浮小球可文字+语音对话)**(分支
 > `feat/voice-hud-2c-m1`,未合 main);下一步 M4 打包 / Phase 3 唤醒词 / 2b(等 Pico)。
 > 红线:杀残留进程用 `fuser -k <port>/tcp` 别 `pkill -f`;Windows 远程一律绝对路径+robocopy;在 main 上提交先确认。
