@@ -1,5 +1,10 @@
 # 路线图:贾维斯语音 HUD
 
+> 🚀 **NEW SESSION 入口**:先读最新交接 [HANDOFF-2026-06-12-windows-d盘源码部署.md](HANDOFF-2026-06-12-windows-d盘源码部署.md)
+> ——贾维斯已迁 Windows D 盘源码版,Phase 2a 全过;**2c M1+M2+M3 已真机验收(悬浮小球可文字+语音对话)**(分支
+> `feat/voice-hud-2c-m1`,未合 main);下一步 M4 打包 / Phase 3 唤醒词 / 2b(等 Pico)。
+> 红线:杀残留进程用 `fuser -k <port>/tcp` 别 `pkill -f`;Windows 远程一律绝对路径+robocopy;在 main 上提交先确认。
+
 持久的分期状态。每个阶段实现的架构见 [design.md](design.md)。
 
 ## 已完成
@@ -28,7 +33,8 @@
 - **代码已合并到 `main`**(2026-06-11);备份 tag `pre-hermes-upgrade` + 分支 `backup-voice-hud-phase0`。
 
 ## 进行中
-- _(无 —— Phase 0/1 + 语音链路定稿均完成并合并 main;下一步是延后的 Phase 2/3)_
+- **Phase 2b**(等硬件 Pico 2 到货):clawtouch GUI 自动化。
+- _Phase 0/1 + 语音链路定稿 + **Phase 2a(Windows 原生 hermes + 远程语音 + 操作本机)** 均已完成。_
 
 > Phase 0(语音字节 RPC,见 [impl-plan-phase0.md](impl-plan-phase0.md))与 Phase 1(环形 HUD 前端,
 > 见 [impl-plan-phase1.md](impl-plan-phase1.md))已完成,移入"已完成"。下面是尚未做的阶段。
@@ -38,11 +44,21 @@
 **方向变更**:不再是"Windows 只做瘦 HUD",而是**贾维斯要操作这台 Windows 的文件和界面**,所以
 **hermes 原生装 Windows**(已确认支持,无需 WSL),STT/TTS 留 Linux 中心当 HTTP API,GUI 自动化用
 clawtouch(Pico HID + 本地 stdio MCP)。目标机已探明:Win11 24H2、原生 Python 有、WSL 没装、局域网通。
-- **2a 文件/命令档**:Linux 把 CosyVoice 绑局域网 + whisper 包 HTTP API → Windows 装 hermes(`install.ps1`)
-  + 配模型/STT/TTS 指向中心 → 跑通"Windows hermes + 远程语音 + 本机文件/命令"。
+- **2a 文件/命令档** —— ✅ **完成**:Windows 装 hermes v0.16.0 + 配模型/STT/TTS 指向中心 + NO_PROXY 直连 →
+  四项端到端实测全过(LLM/TTS/STT/读写本机文件)。原生版 2026-06-11 跑通;**2026-06-12 迁到 D 盘改源码+uv 安装**
+  (`D:\hermes-agent-main` + `D:\hermes-home`,C 盘清空)。详见 [impl-plan-phase2a.md](impl-plan-phase2a.md)。
 - **2b GUI 档**(需硬件 Pico 2):Windows 装 `clawtouch-mcp` + 刷 `clawtouch-hid`,hermes 本地 MCP 接入,
   `clawtouch-skills` 进 skills → 贾维斯能看屏 + 点击操作 Windows。
-- **2c 视觉壳**:Tauri 无边框置顶悬浮窗(原 Phase 2),本地连 Windows hermes;GitHub Actions 出 `.exe`。
+- **2c 视觉壳**:Tauri 无边框置顶悬浮窗(原 Phase 2),本地连 Windows hermes。详见 [impl-plan-phase2c.md](impl-plan-phase2c.md)。
+  - **M1 ✅ 完成(2026-06-12,真机验收 4/4)**:`hud-app/shell/` Tauri 2 壳复用 `hud/dist`(前端零改动,
+    透明+拖拽由 `initialization_script` 运行期注入);Windows `D:\hermes-dev\hud-app` 本地 `tauri dev`
+    出无边框/透明/置顶/可拖/托盘退的悬浮小球(本机工具链编译,无需 GitHub Actions)。
+    分支 `feat/voice-hud-2c-m1`(790b89a + e5100e4)。踩坑:① time 0.3.48(当天发布)破坏 cookie 0.18.1
+    → Cargo.lock pin 0.3.47;② 无边框拖动需 capability `core:window:allow-start-dragging`,缺了静默失败。
+  - **M2 ✅ + M3 ✅ 完成(2026-06-12,真机验收)**:输入框文字往返 + 按住小球全语音回路
+    (远程 STT/TTS 经本机网关)。关键坑:上游 hermes 缺 voice.* RPC(启动补丁注册)、
+    tts_tool command 型走 cmd 不走 Git Bash(桥接改纯 cmd)。详见 [impl-plan-phase2c.md](impl-plan-phase2c.md)。
+  - **M4(剩余)**:`tauri build` 出 `.exe` + 自启动 + 贾维斯图标。
 - **验收门:** 在 Windows 上喊话 → 远程转写 → MiniMax → 远程合成念回;且能让贾维斯读写本机文件、操作界面。
 
 ### Phase 3 —— 唤醒词(喊它名字)—— 已确认

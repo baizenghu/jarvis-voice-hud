@@ -93,6 +93,43 @@ async function endTurn(): Promise<void> {
   }
 }
 
+// Text turn (M2): Enter in #ask → prompt.submit → show reply. Drives the same
+// machine through its existing transitions (listening/transcribing flash by).
+const askEl = document.getElementById("ask") as HTMLInputElement;
+
+async function textTurn(text: string): Promise<void> {
+  if (busy || !machine.can("START_LISTEN")) {
+    return;
+  }
+  busy = true;
+  machine.send("START_LISTEN");
+  machine.send("STOP_LISTEN");
+  youEl.textContent = `you: ${text}`;
+  machine.send("TRANSCRIBED"); // → thinking
+  try {
+    log("thinking…");
+    const reply = await rpc.submitPrompt(text);
+    replyEl.textContent = `Jarvis: ${reply}`;
+    machine.send("REPLIED"); // → speaking (no audio in M2)
+  } catch (e) {
+    log(`turn err: ${(e as Error).message}`);
+  } finally {
+    machine.send("DONE");
+    machine.send("RESET");
+    busy = false;
+  }
+}
+
+askEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    const text = askEl.value.trim();
+    if (text) {
+      askEl.value = "";
+      void textTurn(text);
+    }
+  }
+});
+
 // Press-and-hold activation.
 canvas.addEventListener("mousedown", (e) => {
   e.preventDefault();

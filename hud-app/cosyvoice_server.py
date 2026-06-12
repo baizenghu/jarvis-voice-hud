@@ -26,6 +26,7 @@ import io
 import logging
 import os
 import sys
+import threading
 import time
 
 REPO = "/home/baizh/CosyVoice"
@@ -89,11 +90,28 @@ def health() -> dict:
     return {"ok": _model is not None, "sample_rate": getattr(_model, "sample_rate", None)}
 
 
+# The model is NOT thread-safe: FastAPI sync endpoints run in a threadpool, and
+# concurrent inferences corrupt model state (every later request then fails in
+# token2wav until restart — observed 2026-06-12 when three HUD clients went
+# live). Serialize all inference.
+_infer_lock = threading.Lock()
+
+
 @app.post("/tts")
 def tts(req: TTSRequest) -> Response:
     text = (req.text or "").strip()
     if not text:
         return Response(content=b"", status_code=400)
+    # Too-short text poisons the model: the request itself may return 200, but
+    # every subsequent inference then fails in token2wav ("Kernel size can't be
+    # greater than actual input size") until restart. Punctuation padding does
+    # NOT help (tested: "好的。"=2 speakable chars is safe, "嗯。"=1 poisons) —
+    # what matters is speakable characters, so double a single-char utterance.
+    speakable = sum(1 for c in text if c.isalnum())
+    if speakable == 0:
+        return Response(content=b"", status_code=400)
+    if speakable == 1:
+        text = text + text
     t0 = time.time()
     chunks = []
     # Do NOT pre-split externally — CosyVoice's own frontend normalizes numbers
@@ -102,10 +120,11 @@ def tts(req: TTSRequest) -> Response:
     # and produced fragments shorter than 0.5*prompt_text, which the zero-shot
     # model hallucinates on. Pass the full text; it yields one chunk per
     # internal segment, which we concatenate.
-    for out in _model.inference_zero_shot(
-        text, REF_TEXT, REF_AUDIO, stream=False
-    ):
-        chunks.append(out["tts_speech"])
+    with _infer_lock:
+        for out in _model.inference_zero_shot(
+            text, REF_TEXT, REF_AUDIO, stream=False
+        ):
+            chunks.append(out["tts_speech"])
     audio = torch.concat(chunks, dim=1) if chunks else torch.zeros(1, 1)
     buf = io.BytesIO()
     torchaudio.save(buf, audio, _model.sample_rate, format="wav")

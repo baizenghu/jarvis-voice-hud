@@ -21,6 +21,9 @@
 |---|---|
 | [design.md](design.md) | 架构、分层、数据流、组件、错误处理、测试 |
 | [impl-plan-phase0.md](impl-plan-phase0.md) | Phase 0 可执行实施计划(逐任务 TDD,Linux/浏览器) |
+| [impl-plan-phase1.md](impl-plan-phase1.md) | Phase 1 环形 HUD 前端实施计划 |
+| [impl-plan-phase2a.md](impl-plan-phase2a.md) | Phase 2a Windows 原生 hermes + 远程语音实施计划 |
+| [impl-plan-phase2c.md](impl-plan-phase2c.md) | Phase 2c Tauri 悬浮 HUD(M1 壳✅ → M2 文字往返 → M3 语音 → M4 打包) |
 | [roadmap.md](roadmap.md) | Phase 0→3 计划与状态 |
 | [open-questions.md](open-questions.md) | 仍待拍板的事项 |
 | [decisions/0001-audio-capture-location.md](decisions/0001-audio-capture-location.md) | 为何音频在前端采集,而非 Python 主机 |
