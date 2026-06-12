@@ -25,6 +25,7 @@ Env overrides:
 import io
 import logging
 import os
+import re
 import sys
 import time
 
@@ -97,11 +98,18 @@ def tts(req: TTSRequest) -> Response:
         return Response(content=b"", status_code=400)
     t0 = time.time()
     chunks = []
+    # CosyVoice truncates multi-sentence input in a single inference call, so
+    # split on sentence-ending punctuation and synthesize each segment, then
+    # concatenate — guarantees the whole reply is spoken.
+    segments = [s for s in re.split(r"(?<=[。！？；!?;\n.])", text) if s.strip()]
+    if not segments:
+        segments = [text]
     # zero_shot with cached spk: prompt_text/prompt_wav empty, use spk id.
-    for out in _model.inference_zero_shot(
-        text, "", "", zero_shot_spk_id=SPK_ID, stream=False
-    ):
-        chunks.append(out["tts_speech"])
+    for seg in segments:
+        for out in _model.inference_zero_shot(
+            seg.strip(), "", "", zero_shot_spk_id=SPK_ID, stream=False
+        ):
+            chunks.append(out["tts_speech"])
     audio = torch.concat(chunks, dim=1) if chunks else torch.zeros(1, 1)
     buf = io.BytesIO()
     torchaudio.save(buf, audio, _model.sample_rate, format="wav")
