@@ -65,7 +65,8 @@ async def ws(ws: WebSocket) -> None:
 # {"type":"busy"}/{"type":"idle"} on the same socket so wakes are suppressed
 # while a dialog turn is running (TTS playback would otherwise re-trigger KWS).
 WAKE_COOLDOWN_S = 1.0  # ignore wakes right after a turn ends (TTS echo tail)
-BUSY_MAX_S = 45.0  # busy 超此时长视为僵死会话,自动复位放行唤醒(防永久锁死)
+BUSY_MAX_S = 90.0  # busy 超此时长视为僵死会话,自动复位放行唤醒(防永久锁死)。
+# 须 > 前端每轮超时(SESSION_TIMEOUT_MS=60s),否则慢但正常的工具任务被误判僵死。
 
 class WakeHub:
     def __init__(self) -> None:

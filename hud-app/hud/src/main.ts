@@ -259,7 +259,8 @@ const WAKE_SILENCE_MS = 1200; // end a turn after this much trailing silence
 const WAKE_WAIT_SPEECH_MS = 5000; // give the user this long to start talking
 const WAKE_MAX_MS = 15000; // hard cap per listening window
 const WAKE_LEVEL = 0.08;
-const SESSION_TIMEOUT_MS = 30000; // agent reply timeout → 念提示再听
+const SESSION_TIMEOUT_MS = 60000; // agent reply timeout → 念提示再听。工具任务(看 skill+
+// 跑 terminal,MiniMax 推理 ~20-35s)需要更长,否则正经任务被砍成"没听清"。
 const GREETINGS = ["我在,请讲。", "在的,有什么吩咐?", "先生,随时待命。", "你好 BOSS,我是贾维斯,有什么可以为你效劳?"];
 
 let conversing = false;
