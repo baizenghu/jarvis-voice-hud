@@ -199,6 +199,9 @@ async function speak(text: string): Promise<void> {
   } catch (e) {
     log(`tts err: ${(e as Error).message}`);
   }
+  // 播完(或出错)回 idle,否则卡在 speaking(金色),下一轮 autoListen 的
+  // START_LISTEN 从 speaking 态无效 → 只能聊一轮。DONE 在非 speaking 态是 no-op。
+  machine.send("DONE");
 }
 
 // ── Wake-word session: agent-orchestrated conversation loop (runSession).
