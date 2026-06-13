@@ -165,7 +165,11 @@ def _register_voice_hud_tools() -> None:
 
 
 def _merge_voice_hud(base: list[str] | None) -> list[str] | None:
-    """Add voice_hud to an enabled-toolsets list. None means 'all' (already covers it)."""
+    """Add voice_hud to an enabled-toolsets list. None means 'all' (already
+    covers it). NOTE: MCP servers are NOT handled here — hermes resolves them
+    natively from config (`_load_enabled_toolsets` already includes the server
+    name once `mcp_servers.<name>` is configured). Only voice_hud, our custom
+    runtime-registered toolset, is invisible to that config path and needs this."""
     if base is None:
         return None
     return base if "voice_hud" in base else [*base, "voice_hud"]
@@ -197,8 +201,42 @@ def _enabled_toolsets_for_session() -> list[str] | None:
     return _merge_voice_hud(_load_enabled_toolsets())
 
 
+def _start_mcp_discovery() -> None:
+    """Run hermes's standard MCP tool discovery in the background.
+
+    dev_server is a minimal harness and does NOT run tui_gateway.entry.main(),
+    which is where the real gateway kicks off MCP discovery. Without this,
+    configured `mcp_servers` are never spawned/registered. This calls hermes's
+    own `discover_mcp_tools()` (the same entry.py uses) — not a reimplementation.
+    Gated on config so the MCP SDK import cost stays off the path when unused.
+    """
+    try:
+        from hermes_cli.config import read_raw_config
+
+        servers = (read_raw_config() or {}).get("mcp_servers")
+        if not (isinstance(servers, dict) and servers):
+            return
+    except Exception:
+        pass
+
+    import threading
+
+    def _run() -> None:
+        try:
+            from tools.mcp_tool import discover_mcp_tools
+
+            discover_mcp_tools()
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning("MCP discovery failed", exc_info=True)
+
+    threading.Thread(target=_run, name="dev-mcp-discovery", daemon=True).start()
+
+
 _register_voice_hud_tools()
 _patch_enabled_toolsets()
+_start_mcp_discovery()
 
 
 @app.websocket("/api/events")
@@ -290,6 +328,10 @@ async def _proxy_stream(url: str, fwd_headers: dict) -> StreamingResponse:
     passthrough = ("content-type", "content-length", "content-range", "accept-ranges")
     headers = {k: resp.headers[k] for k in passthrough if k in resp.headers}
     headers.setdefault("content-type", "audio/mp4")
+    # CORS so the Tauri HUD (tauri://localhost) can stream this cross-origin with
+    # crossOrigin="anonymous" WITHOUT tainting the Web Audio analyser (the core/
+    # background dance needs untainted FFT). Local WG-only gateway → * is fine.
+    headers["access-control-allow-origin"] = "*"
     return StreamingResponse(body(), status_code=resp.status_code, headers=headers)
 
 
