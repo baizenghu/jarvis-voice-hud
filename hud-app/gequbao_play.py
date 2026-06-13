@@ -7,11 +7,23 @@
 
 最后一行打印 `PLAYING: <歌名>` / `STOPPED` / `FAILED: <原因>`,供调用方判断。
 """
-import asyncio, json, subprocess, sys, time, urllib.request
+import asyncio, json, os, subprocess, sys, time, urllib.request
 import websockets
 
 PORT = 9222
 PROFILE = "/tmp/jarvis-chrome"
+
+# Chrome 必须拿到桌面会话的音频环境(XDG_RUNTIME_DIR 指向 PipeWire/Pulse socket),
+# 否则有画面无声(页面 audio 在播但没有输出流到系统)。SSH 起子进程时这些 env 缺失。
+_UID = os.getuid()
+_XRD = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{_UID}"
+CHROME_ENV = {
+    "DISPLAY": ":0",
+    "XDG_RUNTIME_DIR": _XRD,
+    "DBUS_SESSION_BUS_ADDRESS": os.environ.get("DBUS_SESSION_BUS_ADDRESS") or f"unix:path={_XRD}/bus",
+    "PATH": "/usr/bin:/bin",
+    "HOME": os.path.expanduser("~"),
+}
 
 
 def cdp_targets():
@@ -28,7 +40,7 @@ def ensure_chrome():
         ["google-chrome", f"--remote-debugging-port={PORT}", f"--user-data-dir={PROFILE}",
          "--autoplay-policy=no-user-gesture-required",
          "--no-first-run", "--no-default-browser-check", "--new-window", "about:blank"],
-        env={"DISPLAY": ":0", "PATH": "/usr/bin:/bin"},
+        env=CHROME_ENV,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(25):
         time.sleep(1)
