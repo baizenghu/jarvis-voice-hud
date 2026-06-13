@@ -60,7 +60,15 @@ const actionBuffer = new ActionBuffer();
 // 唤醒现身,退下隐身。浏览器/小球模式下是 no-op。
 interface TauriGlobals {
   __JARVIS_OVERLAY__?: boolean;
-  __TAURI__?: { window: { getCurrentWindow(): { show(): Promise<void>; hide(): Promise<void> } } };
+  __TAURI__?: {
+    window: {
+      getCurrentWindow(): {
+        show(): Promise<void>;
+        hide(): Promise<void>;
+        setAlwaysOnTop(v: boolean): Promise<void>;
+      };
+    };
+  };
 }
 
 function setHudVisible(visible: boolean): void {
@@ -69,7 +77,13 @@ function setHudVisible(visible: boolean): void {
     return;
   }
   const w = g.__TAURI__.window.getCurrentWindow();
-  void (visible ? w.show() : w.hide());
+  if (visible) {
+    // GTK 的 show() 会丢掉 keep-above:现身后必须重申置顶,否则贾维斯开的
+    // 浏览器/任何窗口都会盖住光圈。
+    void w.show().then(() => w.setAlwaysOnTop(true));
+  } else {
+    void w.hide();
+  }
 }
 
 function reportState(state: "busy" | "idle"): void {
