@@ -126,32 +126,9 @@ def _register_voice_hud_tools() -> None:
     # JSON Schema would push type/properties to the function top level and drop
     # the required `parameters` wrapper.
     voice_hud_tools.set_broadcast(_safe_emit)
-    registry.register(
-        name="play_music",
-        toolset="voice_hud",
-        schema={
-            "description": "在语音 HUD 播放在线音乐(用户想听歌/换歌时调用)",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "歌名或歌手,空=热门"}
-                },
-                "required": ["query"],
-            },
-        },
-        handler=voice_hud_tools.play_music_handler,
-        description="在语音 HUD 播放在线音乐(用户想听歌/换歌时调用)",
-    )
-    registry.register(
-        name="stop_music",
-        toolset="voice_hud",
-        schema={
-            "description": "停止音乐播放",
-            "parameters": {"type": "object", "properties": {}},
-        },
-        handler=voice_hud_tools.stop_music_handler,
-        description="停止音乐播放",
-    )
+    # play_music / stop_music (webview playback) RETIRED — music now plays in a
+    # real browser via the play-music skill (clawtouch + 歌曲宝), not in-webview.
+    # Only end_session remains for the agent-orchestrated session lifecycle.
     registry.register(
         name="end_session",
         toolset="voice_hud",
