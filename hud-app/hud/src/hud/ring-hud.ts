@@ -124,6 +124,14 @@ export class RingHud {
     this.mid += (b.mid - this.mid) * k;
     this.treble += (b.treble - this.treble) * k;
 
+    // Music mode: a full-screen ambient wash that breathes with the beat.
+    // Drawn in screen coords on the transparent canvas → composites over the
+    // dark body (browser) or the desktop (overlay), so the whole background
+    // pulses without touching the CSS / Rust shell.
+    if (this.musicActive) {
+      this.drawMusicBackdrop(W, H);
+    }
+
     const cx = W / 2;
     const cy = H / 2;
     const base = Math.min(W, H) * 0.28;
@@ -268,6 +276,20 @@ export class RingHud {
     }
     ctx.closePath();
     ctx.stroke();
+    ctx.restore();
+  }
+
+  // Full-screen radial wash; bass drives intensity, treble adds a faint lift.
+  private drawMusicBackdrop(W: number, H: number): void {
+    const ctx = this.ctx;
+    const energy = Math.min(1, this.bass * 0.9 + this.treble * 0.3);
+    const grad = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.max(W, H) * 0.75);
+    grad.addColorStop(0, this.withAlpha(MUSIC_PAL.primary, 0.06 + 0.26 * energy));
+    grad.addColorStop(0.55, this.withAlpha(MUSIC_PAL.accent, 0.02 + 0.1 * energy));
+    grad.addColorStop(1, this.withAlpha(MUSIC_PAL.primary, 0));
+    ctx.save();
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
     ctx.restore();
   }
 
