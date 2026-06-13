@@ -72,6 +72,15 @@ clawtouch(Pico HID + 本地 stdio MCP)。目标机已探明:Win11 24H2、原生 
 - 详见 [HANDOFF-2026-06-12-phase3免按住与全屏overlay.md](HANDOFF-2026-06-12-phase3免按住与全屏overlay.md)。
 - **剩余移植项**:Windows 小球免按住(挂到 Phase 2 M4 之后)。
 
+### Phase 4 —— 在线音乐播放 + HUD 跟跳(计划成稿,待实施;架构 [decisions/0006](decisions/0006-music-playback-in-webview.md))
+语音"帮我放首歌"→ 贾维斯放在线流(YouTube,v1;Spotify 延后),**声纹核跟着歌曲跳**。两台都要。
+- **关键架构**:音乐在 **HUD webview 内播**(走与 TTS 相同的 `<audio>`→analyser 路径,声纹核才跟跳);
+  网关 `/api/music?q=` 用 yt-dlp 解析 `bestaudio[ext=m4a]` 并**同源代理**(跨域会让 analyser 哑跳)。否决 mpv/原生进程。
+- 里程碑:**M1 网关代理 ✅** → **M2 前端播放+触发 ✅(2026-06-12,中心 Chrome smoke:放/停端到端通,同源不 tainted)** →
+  **M3 声纹核音乐模式 ✅(2026-06-12,Chrome 像素验收:放歌切品红+核亮度逐帧 CV 8.5%)** → M4 停/KWS 抑制+真机验收。
+  - 触发用**前端意图识别**(`parseMusicIntent`),非原计划的 LLM 工具下发(后端工具不能在 webview 出声 + SOUL prompt 不在 repo);详见 impl-plan M2。
+- 详见 [impl-plan-music-playback.md](impl-plan-music-playback.md)。未决:持续音乐会否淹没/误触 KWS(真机专测)。
+
 ## 延后
 - 声音克隆 TTS(GPT-SoVITS / CosyVoice)—— 仅当用户想要克隆音色时再做。
 - macOS/Linux 桌面打包。

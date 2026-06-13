@@ -6,6 +6,11 @@ import type { HudState } from "../voice/machine.ts";
 
 const CYAN = "#22d3ee";
 const GOLD = "#ffce54";
+const MAGENTA = "#f24bd6";
+
+// Music mode (M3): hotter palette + faster spin; the core reacts to bass and
+// the rings to treble (see drawCore/drawRing) instead of the single mic/TTS level.
+const MUSIC_PAL: Palette = { primary: MAGENTA, accent: GOLD, speedMul: 2.2, coreScale: 1.1 };
 
 interface RingSpec {
   radius: number; // fraction of base radius
@@ -53,9 +58,16 @@ export class RingHud {
 
   // Smoothed audio level so the core animates without jitter.
   private level = 0;
+  // Smoothed bass/mid/treble for music mode.
+  private bass = 0;
+  private mid = 0;
+  private treble = 0;
+  private musicActive = false;
 
   getState: () => HudState = () => "idle";
   getLevel: () => number = () => 0;
+  getBands: () => { bass: number; mid: number; treble: number } = () => ({ bass: 0, mid: 0, treble: 0 });
+  getMusicActive: () => boolean = () => false;
 
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d");
@@ -98,11 +110,19 @@ export class RingHud {
     ctx.clearRect(0, 0, W, H);
 
     const state = this.getState();
-    const pal = paletteFor(state);
+    this.musicActive = this.getMusicActive();
+    const pal = this.musicActive ? MUSIC_PAL : paletteFor(state);
 
     // Smooth the level toward the target.
     const target = this.getLevel();
     this.level += (target - this.level) * Math.min(1, dt * 12);
+
+    // Smooth the bands (fast attack for snappy beat response).
+    const b = this.getBands();
+    const k = Math.min(1, dt * 18);
+    this.bass += (b.bass - this.bass) * k;
+    this.mid += (b.mid - this.mid) * k;
+    this.treble += (b.treble - this.treble) * k;
 
     const cx = W / 2;
     const cy = H / 2;
@@ -163,9 +183,11 @@ export class RingHud {
     ctx.rotate(this.t * spec.speed * pal.speedMul);
     ctx.strokeStyle = color;
     ctx.lineWidth = spec.width * this.dpr;
-    ctx.globalAlpha = (0.55 + 0.25 * this.level) * breath;
+    // Music mode: treble lifts ring brightness + glow for a snappier feel.
+    const reactive = this.musicActive ? this.treble : this.level;
+    ctx.globalAlpha = Math.min(1, (0.55 + 0.3 * reactive) * breath);
     ctx.shadowColor = color;
-    ctx.shadowBlur = 14 * this.dpr;
+    ctx.shadowBlur = (14 + (this.musicActive ? this.treble * 16 : 0)) * this.dpr;
     const step = (Math.PI * 2) / spec.gaps;
     for (let g = 0; g < spec.gaps; g++) {
       const start = g * step;
@@ -203,7 +225,10 @@ export class RingHud {
   // radius scales with audio level.
   private drawCore(maxR: number, pal: Palette, breath: number): void {
     const ctx = this.ctx;
-    const lvl = this.level;
+    // Music mode: bass drives the core pulse, mid/treble drive the waveform wobble.
+    const lvl = this.musicActive ? this.bass : this.level;
+    const wobLo = this.musicActive ? this.mid : this.level;
+    const wobHi = this.musicActive ? this.treble : this.level;
     const coreR = maxR * pal.coreScale * (0.55 + 0.45 * lvl) * breath;
 
     // Glow disk.
@@ -230,8 +255,8 @@ export class RingHud {
       const a = (i / segs) * Math.PI * 2;
       const wob =
         1 +
-        lvl * 0.35 * Math.sin(a * 6 + this.t * 4) +
-        lvl * 0.2 * Math.sin(a * 11 - this.t * 3);
+        wobLo * 0.35 * Math.sin(a * 6 + this.t * 4) +
+        wobHi * 0.25 * Math.sin(a * 11 - this.t * 3);
       const r = coreR * wob;
       const x = Math.cos(a) * r;
       const y = Math.sin(a) * r;

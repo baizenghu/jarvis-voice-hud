@@ -17,3 +17,7 @@
    值得在 Phase 1 开建前先出个视觉 mockup。
 5. **助手默认音色:** 从现有 provider 里哪家/哪个音色最有"贾维斯"味(Edge?ElevenLabs?),
    再考虑是否要克隆音色。
+6. **放歌不干扰语音识别——残留实测项(Phase 4):** 策略已定(分层防御,见
+   [topics/music-vs-asr-isolation.md](topics/music-vs-asr-isolation.md):Layer1 STT 静音音乐 / Layer2 OS 级 AEC / Layer3 duck+自适应)。
+   仅剩两点待真机:① Windows 侧 OS AEC 走声卡自带还是软件方案;② 家里 PipeWire `module-echo-cancel`
+   对外放音乐的压制是否够(KWS 不误触、不漏"贾维斯")。

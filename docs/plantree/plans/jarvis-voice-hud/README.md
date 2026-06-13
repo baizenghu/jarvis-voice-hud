@@ -24,13 +24,16 @@
 | [impl-plan-phase1.md](impl-plan-phase1.md) | Phase 1 环形 HUD 前端实施计划 |
 | [impl-plan-phase2a.md](impl-plan-phase2a.md) | Phase 2a Windows 原生 hermes + 远程语音实施计划 |
 | [impl-plan-phase2c.md](impl-plan-phase2c.md) | Phase 2c Tauri 悬浮 HUD(M1 壳✅ → M2 文字往返 → M3 语音 → M4 打包) |
-| [roadmap.md](roadmap.md) | Phase 0→3 计划与状态 |
+| [impl-plan-music-playback.md](impl-plan-music-playback.md) | Phase 4 在线音乐播放 + HUD 跟跳(M1 网关代理 → M2 播放 → M3 声纹核音乐模式 → M4 停/验收) |
+| [roadmap.md](roadmap.md) | Phase 0→4 计划与状态 |
 | [open-questions.md](open-questions.md) | 仍待拍板的事项 |
+| [topics/music-vs-asr-isolation.md](topics/music-vs-asr-isolation.md) | 放歌不干扰 KWS/STT 的分层防御策略(Phase 4 硬约束) |
 | [decisions/0001-audio-capture-location.md](decisions/0001-audio-capture-location.md) | 为何音频在前端采集,而非 Python 主机 |
 | [decisions/0002-shell-and-visuals.md](decisions/0002-shell-and-visuals.md) | Tauri v2 外壳 + WebGL HUD |
 | [decisions/0003-activation-wake-word.md](decisions/0003-activation-wake-word.md) | 唤醒方式 = 喊它名字 |
 | [decisions/0004-linux-first-milestone.md](decisions/0004-linux-first-milestone.md) | 首个里程碑 = 先在 Linux 浏览器内跑通 |
 | [decisions/0005-windows-native-agent-deployment.md](decisions/0005-windows-native-agent-deployment.md) | agent 原生上 Windows 操控本机;STT/TTS 当 Linux API;GUI 用 clawtouch |
+| [decisions/0006-music-playback-in-webview.md](decisions/0006-music-playback-in-webview.md) | 在线音乐在 webview 内播(网关同源代理)让声纹核跟跳;否决 mpv |
 
 ## 已确认约束(来自用户)
 - 最终运行目标:**Windows**(hermes 在 WSL2 里;HUD 连 localhost)。开发机:**Linux**。

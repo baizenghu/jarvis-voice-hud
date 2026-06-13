@@ -23,13 +23,16 @@ interface — only do this on a trusted network (e.g. the WireGuard interface).
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 import time
 from pathlib import Path
 
+import httpx
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from tui_gateway.ws import handle_ws
@@ -110,6 +113,69 @@ async def wake() -> JSONResponse:
     for c in dead:
         hub.clients.discard(c)
     return JSONResponse({"ok": True, "clients": len(hub.clients)})
+
+
+# --- Phase 4 music proxy (M1) ---------------------------------------------
+# "Play a song" plays IN the HUD webview via <audio src="/api/music?q=...">, so
+# the existing Web Audio analyser sees it and the voiceprint core dances (see
+# decisions/0006). The stream MUST be same-origin: a cross-origin <audio> fed
+# into createMediaElementSource is tainted and the analyser reads all-zeros.
+# So this endpoint resolves an online stream with yt-dlp and proxies the bytes.
+MUSIC_FORMAT = "bestaudio[ext=m4a]/bestaudio"  # m4a/AAC: WebKitGTK decodes it (no webm/ogg)
+MUSIC_RESOLVE_TIMEOUT_S = 20.0
+
+
+async def _resolve_stream_url(query: str) -> str | None:
+    """Resolve a search query to a direct audio stream URL via ``yt-dlp -g``.
+
+    Runs yt-dlp under the current interpreter (``python -m yt_dlp``) so it works
+    without PATH setup and identically on Windows.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "yt_dlp", "-f", MUSIC_FORMAT, "-g", f"ytsearch1:{query}",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=MUSIC_RESOLVE_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return None
+    if proc.returncode != 0:
+        return None
+    lines = [ln for ln in out.decode().splitlines() if ln.strip()]
+    return lines[0] if lines else None
+
+
+@app.get("/api/music", response_model=None)
+async def music(request: Request, q: str = "") -> StreamingResponse | JSONResponse:
+    q = q.strip()
+    if not q:
+        return JSONResponse({"ok": False, "error": "missing q"}, status_code=400)
+    url = await _resolve_stream_url(q)
+    if not url:
+        return JSONResponse({"ok": False, "error": "resolve failed"}, status_code=502)
+
+    fwd_headers = {}
+    rng = request.headers.get("range")  # forward Range so <audio> can seek
+    if rng:
+        fwd_headers["Range"] = rng
+
+    client = httpx.AsyncClient(timeout=httpx.Timeout(MUSIC_RESOLVE_TIMEOUT_S, read=None))
+    req = client.build_request("GET", url, headers=fwd_headers)
+    resp = await client.send(req, stream=True)
+
+    async def body():
+        try:
+            async for chunk in resp.aiter_bytes():
+                yield chunk
+        finally:
+            await resp.aclose()
+            await client.aclose()
+
+    passthrough = ("content-type", "content-length", "content-range", "accept-ranges")
+    headers = {k: resp.headers[k] for k in passthrough if k in resp.headers}
+    headers.setdefault("content-type", "audio/mp4")
+    return StreamingResponse(body(), status_code=resp.status_code, headers=headers)
 
 
 # The old Phase 0 harness stays available at /harness as a fallback.

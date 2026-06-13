@@ -39,6 +39,44 @@ export interface CaptureResult {
   mime: string;
 }
 
+export interface MusicIntent {
+  action: "play" | "stop";
+  query: string; // search query for "play"; "" for "stop"
+}
+
+const STOP_RE =
+  /^(停|停一?下|别放了?|不听了?|关了)$|(停止|关掉?|关闭|别)\s*(放)?\s*(音乐|歌曲?)|(音乐|歌曲?)\s*(停|关)/u;
+
+function playIntent(raw: string): MusicIntent {
+  const q = raw.trim().replace(/^的/u, "");
+  // "放首歌"/"放点音乐" with no real title → a sensible default search.
+  return { action: "play", query: q === "" || /^(歌曲?|音乐|首歌)$/u.test(q) ? "热门音乐" : q };
+}
+
+// Detect a music command in a user utterance. Returns null when it isn't one.
+// Conservative on the bare "放" verb (requires 首/点/个 or a 歌/音乐 noun) so
+// normal speech like "放假了" / "放心吧" is NOT hijacked.
+export function parseMusicIntent(text: string): MusicIntent | null {
+  const t = text.trim().replace(/[\s。.!！?？,，、]+$/u, "");
+  if (STOP_RE.test(t)) {
+    return { action: "stop", query: "" };
+  }
+  const lead = "(?:帮我|给我|请)?\\s*";
+  let m = new RegExp(`^${lead}(?:播放|点播)\\s*(.+)$`, "u").exec(t);
+  if (m) {
+    return playIntent(m[1]);
+  }
+  m = new RegExp(`^${lead}(?:放|来|听)\\s*一?\\s*[首点个]\\s*(.*)$`, "u").exec(t);
+  if (m) {
+    return playIntent(m[1]);
+  }
+  m = new RegExp(`^${lead}放\\s*(.*?)(?:的)?\\s*(?:歌曲?|音乐)$`, "u").exec(t);
+  if (m) {
+    return playIntent(m[1]);
+  }
+  return null;
+}
+
 // 16-bit PCM mono WAV encoder — fallback recording path for engines whose
 // MediaRecorder has no usable audio codec (e.g. WebKitGTK on Linux).
 export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
@@ -69,6 +107,25 @@ export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffe
   return buf;
 }
 
+// Split an FFT magnitude spectrum (0..255 bins) into normalized bass/mid/treble
+// levels (0..1) for the music-reactive core. Pure for testing.
+export function bandLevels(freq: Uint8Array): { bass: number; mid: number; treble: number } {
+  const n = freq.length;
+  if (!n) {
+    return { bass: 0, mid: 0, treble: 0 };
+  }
+  const avg = (lo: number, hi: number): number => {
+    const a = Math.max(0, Math.floor(lo));
+    const b = Math.min(n, Math.floor(hi));
+    let s = 0;
+    for (let i = a; i < b; i++) {
+      s += freq[i];
+    }
+    return b > a ? s / (b - a) / 255 : 0;
+  };
+  return { bass: avg(0, n * 0.08), mid: avg(n * 0.08, n * 0.35), treble: avg(n * 0.35, n) };
+}
+
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
@@ -88,6 +145,14 @@ export class AudioEngine {
   // Playback.
   private player: HTMLAudioElement | null = null;
   private mediaSource: MediaElementAudioSourceNode | null = null;
+
+  // Music playback (Phase 4): online stream plays IN the webview via a
+  // same-origin <audio> (gateway /api/music proxy) so it flows through the
+  // shared analyser and the core dances. crossOrigin is intentionally unset:
+  // the /api/music URL is same-origin → never taints the analyser (a
+  // cross-origin stream would zero out the FFT and the core wouldn't move).
+  private music: HTMLAudioElement | null = null;
+  private musicSource: MediaElementAudioSourceNode | null = null;
 
   onLog: (m: string) => void = () => {};
 
@@ -242,6 +307,62 @@ export class AudioEngine {
     });
   }
 
+  private ensureMusic(): HTMLAudioElement {
+    if (!this.music) {
+      const el = document.createElement("audio");
+      el.id = "music-player";
+      document.body.appendChild(el);
+      this.music = el;
+      const ctx = this.ensureCtx();
+      this.musicSource = ctx.createMediaElementSource(el);
+      // Same rule as TTS: analyser is a sink, NEVER → destination (the mic also
+      // feeds it). Music → analyser (visuals) AND → destination (sound).
+      this.musicSource.connect(this.analyser!);
+      this.musicSource.connect(ctx.destination);
+    }
+    return this.music;
+  }
+
+  // Play an online stream by search query, proxied same-origin by the gateway.
+  async playMusic(query: string): Promise<void> {
+    const el = this.ensureMusic();
+    el.src = `/api/music?q=${encodeURIComponent(query)}`;
+    el.onerror = () => this.onLog("音乐加载/解码失败");
+    try {
+      await el.play();
+      this.onLog(`♪ ${query}`);
+    } catch (e) {
+      this.onLog(`音乐自动播放被拦 (${(e as Error).name})`);
+    }
+  }
+
+  stopMusic(): void {
+    if (!this.music) {
+      return;
+    }
+    this.music.pause();
+    this.music.removeAttribute("src");
+    this.music.load();
+    this.onLog("音乐已停");
+  }
+
+  isMusicPlaying(): boolean {
+    return !!this.music && !this.music.paused && !this.music.ended;
+  }
+
+  // Pause music for a clean STT window (decisions/0006 Layer 1: music must not
+  // bleed into speech recognition). Returns a resume fn; no-op if not playing
+  // (and a no-op resume if the music was stopped meanwhile, since play() on a
+  // src-less element rejects and is swallowed).
+  duckForSpeech(): () => void {
+    const el = this.music;
+    if (!el || el.paused) {
+      return () => {};
+    }
+    el.pause();
+    return () => void el.play().catch(() => {});
+  }
+
   // 0..1 RMS-ish level from the FFT magnitude — drives the reactive core.
   getLevel(): number {
     if (!this.analyser) {
@@ -263,5 +384,14 @@ export class AudioEngine {
     }
     this.analyser.getByteFrequencyData(this.freqData);
     return this.freqData;
+  }
+
+  // Normalized bass/mid/treble for the music-reactive core (M3).
+  getBands(): { bass: number; mid: number; treble: number } {
+    if (!this.analyser) {
+      return { bass: 0, mid: 0, treble: 0 };
+    }
+    this.analyser.getByteFrequencyData(this.freqData);
+    return bandLevels(this.freqData);
   }
 }
