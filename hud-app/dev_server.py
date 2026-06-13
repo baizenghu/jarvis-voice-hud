@@ -65,19 +65,28 @@ async def ws(ws: WebSocket) -> None:
 # {"type":"busy"}/{"type":"idle"} on the same socket so wakes are suppressed
 # while a dialog turn is running (TTS playback would otherwise re-trigger KWS).
 WAKE_COOLDOWN_S = 1.0  # ignore wakes right after a turn ends (TTS echo tail)
+BUSY_MAX_S = 45.0  # busy 超此时长视为僵死会话,自动复位放行唤醒(防永久锁死)
 
 class WakeHub:
     def __init__(self) -> None:
         self.clients: set[WebSocket] = set()
         self.busy = False
         self.idle_since = 0.0
+        self.busy_since = 0.0
 
     def accepts_wake(self, now: float | None = None) -> bool:
         now = time.monotonic() if now is None else now
+        # busy 自愈:一次卡死会话(TTS 卡/HUD 中途断)会把 busy 永久置真、之后全唤不醒。
+        # 超过 BUSY_MAX_S 仍 busy 视为僵死,强制复位放行。
+        if self.busy and (now - self.busy_since) > BUSY_MAX_S:
+            self.busy = False
+            self.idle_since = now
         return not self.busy and (now - self.idle_since) >= WAKE_COOLDOWN_S
 
     def set_busy(self, busy: bool, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
+        if busy and not self.busy:
+            self.busy_since = now
         if self.busy and not busy:
             self.idle_since = now
         self.busy = busy

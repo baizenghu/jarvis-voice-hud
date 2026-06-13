@@ -259,14 +259,30 @@ export class AudioEngine {
     }
   }
 
-  // Wait until playback ends (or resolves immediately if no player/already ended).
+  // Wait until playback ends. 绝不无限等:onended 可能因汇异常(如切到 HDMI 后
+  // WebKitGTK 播放不触发 onended)永不到,故同时监听 onerror 并按时长设硬超时上限。
   awaitPlaybackEnd(): Promise<void> {
     const player = this.player;
     if (!player || player.ended || player.paused) {
       return Promise.resolve();
     }
     return new Promise((res) => {
-      player.onended = () => res();
+      let done = false;
+      const finish = (): void => {
+        if (done) {
+          return;
+        }
+        done = true;
+        clearTimeout(timer);
+        res();
+      };
+      player.onended = finish;
+      player.onerror = finish;
+      const cap =
+        Number.isFinite(player.duration) && player.duration > 0
+          ? player.duration * 1000 + 2000
+          : 20000;
+      const timer = setTimeout(finish, cap);
     });
   }
 

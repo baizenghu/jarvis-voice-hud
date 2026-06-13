@@ -66,8 +66,10 @@ async function withTimeout<T>(
 export async function runSession(d: SessionDeps): Promise<void> {
   d.reportState("busy");
   d.setHudVisible(true);
-  await d.speak(d.pickGreeting()); // 固定招呼(前端自主说话之一)
   try {
+    // 招呼移入 try、且套硬超时:即便 TTS 合成/播放卡住或抛错,也必走到 finally 清 busy,
+    // 否则一次卡死会让网关永远停在 busy、之后所有唤醒被拒。
+    await withTimeout(d.speak(d.pickGreeting()), d.timeoutMs, d.sleep);
     for (;;) {
       d.buffer.clear(); // 录音起始:丢弃上一轮 straggler 动作
       const text = await d.listen(); // 复用现有录音/VAD/回声/静音逻辑
@@ -76,10 +78,10 @@ export async function runSession(d: SessionDeps): Promise<void> {
       }
       const reply = await withTimeout(d.submitPrompt(text), d.timeoutMs, d.sleep);
       if (reply === TIMEOUT) {
-        await d.speak("没听清,再说一次?");
+        await withTimeout(d.speak("没听清,再说一次?"), d.timeoutMs, d.sleep);
         continue;
       }
-      await d.speak(reply); // 念 agent 回复(message.complete 文本)
+      await withTimeout(d.speak(reply), d.timeoutMs, d.sleep); // 念 agent 回复(超时也不卡)
       await d.sleep(50); // 排空窗:收尾随动作事件
       let ended = false;
       for (const act of d.buffer.drain()) {
