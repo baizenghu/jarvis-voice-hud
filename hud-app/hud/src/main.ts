@@ -30,11 +30,21 @@ rpc.onStatus = (s) => {
   statusEl.textContent = `ws: ${s}`;
 };
 
+// 外部声级:音乐在独立 Chrome 出声,webview analyser 看不到。audio_levels.py 从
+// 系统 sink monitor 算出频段经 /api/events 推来(type:"audio"),新鲜(<400ms)时
+// 优先用它驱动光圈+背景,否则回落到 webview analyser。
+let extBands = { bass: 0, mid: 0, treble: 0 };
+let extTs = 0;
+const extFresh = (): boolean => performance.now() - extTs < 400;
+// 外部音乐是否在响(系统输出有声且数据新鲜)。webview 音乐已废,只看外部。
+const musicPlaying = (): boolean =>
+  extFresh() && extBands.bass + extBands.mid + extBands.treble > 0.05;
+
 const hud = new RingHud(canvas);
 hud.getState = () => machine.state;
 hud.getLevel = () => audio.getLevel();
-hud.getBands = () => audio.getBands();
-hud.getMusicActive = () => audio.isMusicPlaying();
+hud.getBands = () => (extFresh() ? extBands : audio.getBands());
+hud.getMusicActive = () => musicPlaying() || audio.isMusicPlaying();
 hud.start();
 
 machine.onChange((s) => {
@@ -81,7 +91,8 @@ function setHudVisible(visible: boolean): void {
     // GTK 的 show() 会丢掉 keep-above:现身后必须重申置顶,否则贾维斯开的
     // 浏览器/任何窗口都会盖住光圈。
     void w.show().then(() => w.setAlwaysOnTop(true));
-  } else {
+  } else if (!musicPlaying()) {
+    // 音乐还在放就别藏:让光圈继续跟着跳(由 music watcher 在停后收回)。
     void w.hide();
   }
 }
@@ -96,8 +107,18 @@ function connectEvents(): void {
   // same gateway as the RPC socket (handles the Tauri __JARVIS_WS_URL__ override)
   const ws = new WebSocket(wsUrl().replace(/\/api\/ws$/, "/api/events"));
   ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data as string) as { type?: string; query?: string };
+    const msg = JSON.parse(e.data as string) as {
+      type?: string;
+      query?: string;
+      bass?: number;
+      mid?: number;
+      treble?: number;
+    };
     switch (msg.type) {
+    case "audio":
+      extBands = { bass: msg.bass ?? 0, mid: msg.mid ?? 0, treble: msg.treble ?? 0 };
+      extTs = performance.now();
+      break;
     case "wake":
       log("唤醒:贾维斯");
       void wakeSession();
@@ -365,3 +386,13 @@ window.addEventListener("touchend", () => void endTurn());
 
 rpc.connect().catch((e) => log(`connect failed: ${(e as Error).message}`));
 connectEvents();
+
+// Music watcher:音乐在放就保持光圈可见(会话结束后仍跟跳),停了且不在会话时收回。
+// setHudVisible(true) 每拍重申 setAlwaysOnTop,持续压住贾维斯开的播放器窗口。
+setInterval(() => {
+  if (musicPlaying()) {
+    setHudVisible(true);
+  } else if (!conversing && !busy) {
+    setHudVisible(false);
+  }
+}, 300);

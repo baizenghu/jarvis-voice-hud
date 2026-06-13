@@ -249,6 +249,20 @@ async def wake() -> JSONResponse:
     return JSONResponse({"ok": True, "clients": len(hub.clients)})
 
 
+@app.post("/api/audio_level")
+async def audio_level(request: Request) -> JSONResponse:
+    """系统输出声级(由 audio_levels.py 从 sink monitor 算出后 POST 进来),
+    广播给 HUD 让光圈+背景跟独立播放器的音乐跳动(webview analyser 看不到那段音频)。"""
+    d = await request.json()
+    n = await hub.broadcast({
+        "type": "audio",
+        "bass": float(d.get("bass", 0.0)),
+        "mid": float(d.get("mid", 0.0)),
+        "treble": float(d.get("treble", 0.0)),
+    })
+    return JSONResponse({"ok": True, "clients": n})
+
+
 # --- Phase 4 music proxy (M1) ---------------------------------------------
 # "Play a song" plays IN the HUD webview via <audio src="/api/music?q=...">, so
 # the existing Web Audio analyser sees it and the voiceprint core dances (see
