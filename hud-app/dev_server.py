@@ -29,6 +29,8 @@ import sys
 import time
 from pathlib import Path
 
+from urllib.parse import quote
+
 import httpx
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -121,8 +123,15 @@ async def wake() -> JSONResponse:
 # decisions/0006). The stream MUST be same-origin: a cross-origin <audio> fed
 # into createMediaElementSource is tainted and the analyser reads all-zeros.
 # So this endpoint resolves an online stream with yt-dlp and proxies the bytes.
+#
+# MUSIC_UPSTREAM (optional): when set, this gateway does NOT resolve locally —
+# it relays /api/music to another gateway's /api/music (e.g. the GPU center,
+# whose IP isn't bot-blocked by YouTube). Home reaches YouTube through the
+# center over WireGuard, with no cookies. The relayed stream stays same-origin
+# to the HUD page (the analyser requirement) because home re-proxies the bytes.
 MUSIC_FORMAT = "bestaudio[ext=m4a]/bestaudio"  # m4a/AAC: WebKitGTK decodes it (no webm/ogg)
 MUSIC_RESOLVE_TIMEOUT_S = 20.0
+MUSIC_UPSTREAM = os.environ.get("MUSIC_UPSTREAM", "").rstrip("/")
 
 
 async def _resolve_stream_url(query: str) -> str | None:
@@ -146,20 +155,9 @@ async def _resolve_stream_url(query: str) -> str | None:
     return lines[0] if lines else None
 
 
-@app.get("/api/music", response_model=None)
-async def music(request: Request, q: str = "") -> StreamingResponse | JSONResponse:
-    q = q.strip()
-    if not q:
-        return JSONResponse({"ok": False, "error": "missing q"}, status_code=400)
-    url = await _resolve_stream_url(q)
-    if not url:
-        return JSONResponse({"ok": False, "error": "resolve failed"}, status_code=502)
-
-    fwd_headers = {}
-    rng = request.headers.get("range")  # forward Range so <audio> can seek
-    if rng:
-        fwd_headers["Range"] = rng
-
+async def _proxy_stream(url: str, fwd_headers: dict) -> StreamingResponse:
+    """Stream-proxy an upstream audio URL back to the caller (same-origin to the
+    HUD page), forwarding Range and passing through the content headers."""
     client = httpx.AsyncClient(timeout=httpx.Timeout(MUSIC_RESOLVE_TIMEOUT_S, read=None))
     req = client.build_request("GET", url, headers=fwd_headers)
     resp = await client.send(req, stream=True)
@@ -176,6 +174,27 @@ async def music(request: Request, q: str = "") -> StreamingResponse | JSONRespon
     headers = {k: resp.headers[k] for k in passthrough if k in resp.headers}
     headers.setdefault("content-type", "audio/mp4")
     return StreamingResponse(body(), status_code=resp.status_code, headers=headers)
+
+
+@app.get("/api/music", response_model=None)
+async def music(request: Request, q: str = "") -> StreamingResponse | JSONResponse:
+    q = q.strip()
+    if not q:
+        return JSONResponse({"ok": False, "error": "missing q"}, status_code=400)
+
+    fwd_headers = {}
+    rng = request.headers.get("range")  # forward Range so <audio> can seek
+    if rng:
+        fwd_headers["Range"] = rng
+
+    # Relay mode: hand off to the upstream gateway (it resolves + proxies).
+    if MUSIC_UPSTREAM:
+        return await _proxy_stream(f"{MUSIC_UPSTREAM}/api/music?q={quote(q)}", fwd_headers)
+
+    url = await _resolve_stream_url(q)
+    if not url:
+        return JSONResponse({"ok": False, "error": "resolve failed"}, status_code=502)
+    return await _proxy_stream(url, fwd_headers)
 
 
 # The old Phase 0 harness stays available at /harness as a fallback.
