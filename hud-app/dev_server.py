@@ -96,6 +96,96 @@ class WakeHub:
 hub = WakeHub()
 
 
+# --- voice_hud agent tools -------------------------------------------------
+# The in-process gateway agent (tui_gateway/server.py) drives the thin HUD by
+# calling voice_hud tools (play_music / stop_music / end_session). Their
+# handlers broadcast action events to /api/events via _safe_emit, which bounces
+# hub.broadcast() onto the uvicorn event loop from whatever thread the tool
+# dispatch runs on (handlers may run in a thread pool).
+import voice_hud_tools
+from agent.async_utils import safe_schedule_threadsafe
+from tools.registry import registry
+
+_main_loop: asyncio.AbstractEventLoop | None = None
+
+
+@app.on_event("startup")
+async def _capture_loop() -> None:
+    global _main_loop
+    _main_loop = asyncio.get_running_loop()
+
+
+def _safe_emit(event: dict) -> None:
+    """Schedule hub.broadcast(event) on the uvicorn loop, thread-safe."""
+    safe_schedule_threadsafe(hub.broadcast(event), _main_loop)
+
+
+def _register_voice_hud_tools() -> None:
+    # schema MUST be {"description":..., "parameters":{...}} — registry.get_definitions
+    # merges {**schema, "name": name} into the OpenAI `function` object. A bare
+    # JSON Schema would push type/properties to the function top level and drop
+    # the required `parameters` wrapper.
+    voice_hud_tools.set_broadcast(_safe_emit)
+    registry.register(
+        name="play_music",
+        toolset="voice_hud",
+        schema={
+            "description": "在语音 HUD 播放在线音乐(用户想听歌/换歌时调用)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "歌名或歌手,空=热门"}
+                },
+                "required": ["query"],
+            },
+        },
+        handler=voice_hud_tools.play_music_handler,
+        description="在语音 HUD 播放在线音乐(用户想听歌/换歌时调用)",
+    )
+    registry.register(
+        name="stop_music",
+        toolset="voice_hud",
+        schema={
+            "description": "停止音乐播放",
+            "parameters": {"type": "object", "properties": {}},
+        },
+        handler=voice_hud_tools.stop_music_handler,
+        description="停止音乐播放",
+    )
+    registry.register(
+        name="end_session",
+        toolset="voice_hud",
+        schema={
+            "description": "结束本次语音对话、HUD 隐身(用户说退下/再见时调用)",
+            "parameters": {"type": "object", "properties": {}},
+        },
+        handler=voice_hud_tools.end_session_handler,
+        description="结束本次语音对话、HUD 隐身(用户说退下/再见时调用)",
+    )
+
+
+def _enabled_toolsets_for_session() -> list[str] | None:
+    """The session agent's enabled toolsets, with voice_hud merged in.
+
+    The gateway builds its agent with enabled_toolsets=_load_enabled_toolsets()
+    (HERMES_TUI_TOOLSETS / CLI config), which would NOT include voice_hud — so
+    merely registering the tools is not enough for the agent to see them. None
+    means "all toolsets" (the default-everything path already covers the
+    registry-registered voice_hud), so leave it as-is; otherwise append.
+    """
+    from tui_gateway.server import _load_enabled_toolsets
+
+    base = _load_enabled_toolsets()
+    if base is None:
+        return None
+    if "voice_hud" not in base:
+        return [*base, "voice_hud"]
+    return base
+
+
+_register_voice_hud_tools()
+
+
 @app.websocket("/api/events")
 async def events(ws: WebSocket) -> None:
     await ws.accept()
