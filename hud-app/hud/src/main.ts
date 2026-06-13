@@ -324,6 +324,17 @@ async function autoListen(): Promise<string | null> {
   }
 }
 
+// 对话期间把真实音乐音量压低(经网关 CDP 调 audio.volume),否则音乐灌进 STT 录音,
+// 系统 AEC 在 double-talk 下压不净人声,whisper 判 no speech detected。会话结束恢复。
+function duckMusic(on: boolean): void {
+  const base = wsUrl().replace(/^ws/, "http").replace(/\/api\/ws$/, "");
+  void fetch(`${base}/api/music_duck`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ on }),
+  }).catch(() => {});
+}
+
 // Wake → drive the agent-orchestrated session. The agent decides everything
 // (answer / play / stop / end); this only assembles the I/O deps.
 async function wakeSession(): Promise<void> {
@@ -331,6 +342,10 @@ async function wakeSession(): Promise<void> {
     return;
   }
   conversing = true;
+  const duckedMusic = musicPlaying();
+  if (duckedMusic) {
+    duckMusic(true); // 对话期间压低音乐,STT 才听得清
+  }
   await runSession({
     listen: autoListen,
     submitPrompt: (text) => rpc.submitPrompt(text),
@@ -344,6 +359,9 @@ async function wakeSession(): Promise<void> {
     buffer: actionBuffer,
     timeoutMs: SESSION_TIMEOUT_MS,
   }).catch((e) => log(`session err: ${(e as Error).message}`));
+  if (duckedMusic) {
+    duckMusic(false); // 会话结束恢复音量(若已停止则无害)
+  }
   conversing = false;
 }
 

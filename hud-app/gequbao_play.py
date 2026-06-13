@@ -68,7 +68,7 @@ async def connect():
     return await websockets.connect(pages[0]["webSocketDebuggerUrl"], max_size=None)
 
 
-async def run(query, stop):
+async def run(query, stop, vol=None):
     ensure_chrome()
     ws = await connect()
     i = 0
@@ -85,6 +85,10 @@ async def run(query, stop):
         return (r.get("result") or {}).get("value")
 
     await cmd("Page.enable")
+    if vol is not None:
+        # 对话期间压低/恢复音量(CDP 即时,不导航),让 STT 不被音乐灌满。
+        await js(f"var x=document.querySelector('audio'); if(x){{x.volume={vol}}}")
+        print(f"VOL {vol}"); return
     if stop:
         await js("var x=document.querySelector('audio'); if(x){x.pause()}")
         signal_music(False)
@@ -122,8 +126,17 @@ async def run(query, stop):
 def main():
     args = sys.argv[1:]
     stop = "--stop" in args
+    vol = None
+    if "--volume" in args:
+        i = args.index("--volume")
+        if i + 1 < len(args):
+            try:
+                vol = float(args[i + 1])
+            except ValueError:
+                vol = None
+        args = args[:i] + args[i + 2:]  # 去掉 --volume 及其值,不混入歌名
     query = " ".join(a for a in args if not a.startswith("--")) or "热门"
-    asyncio.run(run(query, stop))
+    asyncio.run(run(query, stop, vol))
 
 
 if __name__ == "__main__":

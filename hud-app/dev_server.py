@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -270,6 +271,20 @@ async def music_state(request: Request) -> JSONResponse:
     d = await request.json()
     n = await hub.broadcast({"type": "music_state", "on": bool(d.get("on"))})
     return JSONResponse({"ok": True, "clients": n})
+
+
+_GEQUBAO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gequbao_play.py")
+
+
+@app.post("/api/music_duck")
+async def music_duck(request: Request) -> JSONResponse:
+    """对话期间把歌曲音量压低(CDP),会话结束恢复。不压的话音乐灌进 STT 录音,
+    系统 AEC 在 double-talk 下压不净 near-end 语音,whisper 判 no speech。"""
+    d = await request.json()
+    vol = "0.12" if bool(d.get("on")) else "1.0"
+    subprocess.Popen([sys.executable, _GEQUBAO, "--volume", vol],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return JSONResponse({"ok": True, "vol": vol})
 
 
 # --- Phase 4 music proxy (M1) ---------------------------------------------
