@@ -1,9 +1,10 @@
 # 路线图:贾维斯语音 HUD
 
-> 🚀 **NEW SESSION 入口**:先读最新交接 [HANDOFF-2026-06-12-phase3免按住与全屏overlay.md](HANDOFF-2026-06-12-phase3免按住与全屏overlay.md)
-> ——**Phase 3 免按住已在家里 Linux 真机验收**(双语唤醒"贾维斯/Jarvis"+连续对话+"退下"隐身,全屏 overlay 形态);
-> 2c M1+M2+M3 此前已过(Windows 小球文字+语音);下一步 M4 自启/打包 / 免按住移植 Windows / 2b(等 Pico)。
-> 红线:杀残留进程用 `fuser -k <port>/tcp` 别 `pkill -f`;Windows 远程一律绝对路径+robocopy;在 main 上提交先确认。
+> 🚀 **NEW SESSION 入口**:先读最新交接 [HANDOFF-2026-06-13-agent-orchestration.md](HANDOFF-2026-06-13-agent-orchestration.md)
+> ——**控制权倒转(agent 编排 + 薄客户端)Phase 0-3 在分支 `feat/voice-hud-agent-orchestration` 建好并验证**(0.3 全链路 smoke 3/3,
+> 工具接线修复 b8410e7),未合 main、未上真机;下一步 **Phase 4 真机部署家里 + 语音验收**。
+> 此前:Phase 3 免按住已家里真机验收(上篇 HANDOFF);Windows 2c M1-M3 过。
+> 红线:语义全交 agent(前端正则已废);工具须 monkeypatch `_load_enabled_toolsets`;杀端口 `fuser -k`;tar 连 hud/src;在 main 上提交先确认。
 
 持久的分期状态。每个阶段实现的架构见 [design.md](design.md)。
 
@@ -81,11 +82,14 @@ clawtouch(Pico HID + 本地 stdio MCP)。目标机已探明:Win11 24H2、原生 
   - 触发用**前端意图识别**(`parseMusicIntent`),非原计划的 LLM 工具下发(后端工具不能在 webview 出声 + SOUL prompt 不在 repo);详见 impl-plan M2。
 - 详见 [impl-plan-music-playback.md](impl-plan-music-playback.md)。未决:持续音乐会否淹没/误触 KWS(真机专测)。
 
-### 架构重构 —— 控制权倒转(agent 编排 + 薄客户端)(设计成稿,待实现计划)
+### 架构重构 —— 控制权倒转(agent 编排 + 薄客户端)(Phase 0-3 已实现+验证,待真机)
 现架构前端当大脑(正则判语义),证伪于"放首"→whisper"放手"正则失配。改为:KWS 开门 → agent 编排
 (收文本→判断→调 `play_music`/`stop_music`/`end_session` 工具 + 出话)→ 前端退化薄客户端执行。
 音乐改由 **agent 工具**触发(取代前端意图识别),decisions/0006 的 webview 播放+中心中转不变。
-设计见 [design-agent-orchestration.md](design-agent-orchestration.md)。头号风险:MiniMax-M3 工具调用稳定性(真机测)。
+- **进展(分支 `feat/voice-hud-agent-orchestration`)**:Phase 0-3 完成,单测/contract/build/lint + **0.3 全链路 smoke 3/3** 全绿;
+  头号风险(MiniMax 工具调用)在真 agent 路径已验稳。关键坑:工具须 monkeypatch 网关 `_load_enabled_toolsets` 才进 agent 清单(`b8410e7`)。
+- **剩 Phase 4**:真机部署家里 + 语音验收(动实时设备)。
+设计/计划见 [design-agent-orchestration.md](design-agent-orchestration.md) / [impl-plan-agent-orchestration.md](impl-plan-agent-orchestration.md)。
 
 ## 延后
 - 声音克隆 TTS(GPT-SoVITS / CosyVoice)—— 仅当用户想要克隆音色时再做。

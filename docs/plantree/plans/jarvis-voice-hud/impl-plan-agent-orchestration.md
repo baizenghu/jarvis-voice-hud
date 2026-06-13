@@ -10,6 +10,12 @@
 
 **分支:** `feat/voice-hud-agent-orchestration`(新分支,现 Phase 3 loop 可回退)。
 
+**进度(2026-06-13):**
+- **Phase 0 ✅**:0.1 minimaxi 支持 OpenAI tools(裸 API 返 tool_call);0.2 contract 测试绿;0.3 全链路 smoke 3/3(放歌→play_music、退下→end_session、普通问题→不触发)。
+- **Phase 1/2/3 ✅**:workflow 产出 + 独立复跑验证(后端 12 pytest、前端 20 vitest、build/lint 全绿)。提交 `1b5ad5f..15f5f06`。
+- **关键修复 `b8410e7`**:0.3 smoke 暴露——仅 `registry.register` + 一个没人调的 helper,运行时 voice_hud **不在** agent 工具清单(`_load_enabled_toolsets` 返回不含它的具体 18 项列表)→ agent 闲聊+幻觉。改为 dev_server 启动 **monkeypatch `tui_gateway.server._load_enabled_toolsets`** 合并 voice_hud。修后 agent 真调工具。**教训**:注册工具 ≠ agent 能看到,必须并进运行时 enabled_toolsets(Codex 第④条)。
+- **剩 Phase 4**:真机部署家里 + 语音验收(未做,动实时设备,待用户发话)。
+
 **复核:** 经 Codex 审查 + 代码核实修正(2026-06-13):schema 须 `{description,parameters}`、handler 收 `(args,**kw)`、`safe_schedule_threadsafe(coro,loop)` loop 必传、voice_hud 须并进 `enabled_toolsets`、turn-id 移除改串行+clear/drain、0.2 产出可执行 contract 测试、新增 0.3 全链路工具调用闸门、关键触发规则进工具 description。
 
 ---
