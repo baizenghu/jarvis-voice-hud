@@ -115,6 +115,7 @@ export class AudioEngine {
   // cross-origin stream would zero out the FFT and the core wouldn't move).
   private music: HTMLAudioElement | null = null;
   private musicSource: MediaElementAudioSourceNode | null = null;
+  private musicUrl: string | null = null; // current blob: object URL (revoke on replace/stop)
 
   onLog: (m: string) => void = () => {};
 
@@ -285,16 +286,45 @@ export class AudioEngine {
     return this.music;
   }
 
-  // Play an online stream by search query, proxied same-origin by the gateway.
+  // Gateway HTTP base for /api/music. Under tauri:// the page is NOT served by
+  // the gateway, so a relative URL won't reach it — derive the base from the
+  // injected WS URL (ws://host/api/ws → http://host). In a browser (no
+  // override) return "" so the relative same-origin gateway URL is used.
+  private gatewayBase(): string {
+    const ws = (window as { __JARVIS_WS_URL__?: string }).__JARVIS_WS_URL__;
+    return ws ? ws.replace(/^ws/, "http").replace(/\/api\/ws$/, "") : "";
+  }
+
+  // Play an online stream by search query. Fetch the bytes and play from a
+  // same-origin blob: URL — a cross-origin <audio src> would taint the analyser
+  // (no dance), and under tauri:// a relative URL wouldn't reach the gateway.
   async playMusic(query: string): Promise<void> {
     const el = this.ensureMusic();
-    el.src = `/api/music?q=${encodeURIComponent(query)}`;
-    el.onerror = () => this.onLog("音乐加载/解码失败");
+    const url = `${this.gatewayBase()}/api/music?q=${encodeURIComponent(query)}`;
+    let blobUrl: string;
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        this.onLog(`音乐获取失败 HTTP ${resp.status}`);
+        return;
+      }
+      blobUrl = URL.createObjectURL(await resp.blob());
+    } catch (e) {
+      this.onLog(`音乐获取失败 (${(e as Error).name}) — 查网关/CSP connect-src`);
+      return;
+    }
+    if (this.musicUrl) {
+      URL.revokeObjectURL(this.musicUrl);
+    }
+    this.musicUrl = blobUrl;
+    el.onerror = () =>
+      this.onLog(`音乐解码失败 (MediaError ${el.error?.code}) — WebKitGTK 可能不支持该编码`);
+    el.src = blobUrl;
     try {
       await el.play();
       this.onLog(`♪ ${query}`);
     } catch (e) {
-      this.onLog(`音乐自动播放被拦 (${(e as Error).name})`);
+      this.onLog(`音乐播放被拦 (${(e as Error).name})`);
     }
   }
 
@@ -305,6 +335,10 @@ export class AudioEngine {
     this.music.pause();
     this.music.removeAttribute("src");
     this.music.load();
+    if (this.musicUrl) {
+      URL.revokeObjectURL(this.musicUrl);
+      this.musicUrl = null;
+    }
     this.onLog("音乐已停");
   }
 
