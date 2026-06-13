@@ -31,6 +31,17 @@
 - **系统音频 loopback 抓流再分析**(PulseAudio monitor / WASAPI loopback 回喂 analyser):Linux 勉强可行、
   Windows 难,且引入麦克风/回声纠缠。同源代理路径更统一、两台一致。
 
+## 家里 IP 被 YouTube 反爬 → 中心中转(MUSIC_UPSTREAM,零 cookies)
+2026-06-12 部署家里 Linux(10.8.0.3)发现:家里 IP 被 YouTube bot 检测拦
+("Sign in to confirm you're not a bot",换 player_client 无效),B 站 `bilisearch` 412 风控——
+裸 yt-dlp 拿不到直链;**中心(10.8.0.2)IP 没被拦**。
+- **决策**:`dev_server.py` 加 `MUSIC_UPSTREAM` env。家里网关设 `MUSIC_UPSTREAM=http://10.8.0.2:8766`,
+  `/api/music` 转发到中心同款端点(中心本地 yt-dlp 解析+取流),家里再**同源**回传页面(analyser 不 tainted)。
+  中心跑一个 `dev_server` 实例绑 `10.8.0.2:8766`(不设 MUSIC_UPSTREAM = 本地解析)。
+- **为何不上 cookies**:cookies = 用户登录态,会过期要维护。家里本就依赖中心跑 STT/TTS,
+  走中心中转**不新增可用性依赖、零登录**。已否决 YouTube/B 站 cookies 方案(除非中心也被拦再议)。
+- 部署细节(进程/env/yt-dlp 装法)见 [impl-plan-music-playback.md](../impl-plan-music-playback.md) 部署记录。
+
 ## 硬约束:放歌不得干扰语音识别
 用户明确要求歌声不能影响 KWS/STT。**webview 内播带来的红利**:HUD 100% 知道何时在放、且持有音量控制 →
 "听音时确定性静音音乐"成立(mpv 方案做不到)。分层防御(Layer1 STT 静音音乐 / Layer2 OS 级 AEC / Layer3 duck+自适应)

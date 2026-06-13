@@ -69,6 +69,16 @@
 - "停/别放了/退下"暂停 audio + 退音乐态;退下仍走 Phase 3 隐身。
 - **验收门**:两台真机放鼓点强的歌,期间①喊"贾维斯"能醒 ②醒后转写干净 ③"停"退场。
 
+## 家里 Linux 部署记录(2026-06-12,M1-M3 软件已上)
+家里 10.8.0.3 已推 `dev_server.py`(含 MUSIC_UPSTREAM 中转)+ `hud/src`,dist 重建(bundle hash 与中心一致)。
+- **yt-dlp 装法**:家里 venv 是 **uv 建的、无 pip**;用 `~/.local/bin/uv pip install --python ~/hermes-agent/.venv/bin/python yt-dlp`。
+- **YouTube 家里被拦** → 中心中转(见 [decisions/0006](decisions/0006-music-playback-in-webview.md))。
+- **新增进程(均 nohup,重启不自启,M4 systemd 收编)**:
+  - 中心(10.8.0.2):`HOST=10.8.0.2 PORT=8766 .venv/bin/python hud-app/dev_server.py`(音乐中转,本地解析 YouTube)。
+  - 家里网关启动 env **必须加** `MUSIC_UPSTREAM=http://10.8.0.2:8766`(其余 env 同 HANDOFF ②)。
+- **已验证**:家里 `curl /api/music?q=晴天` → 206 + audio/mp4 + content-range(经中心中转)。
+- **未验**:家里 tauri 壳当前没在跑;放歌+跟跳+不干扰 KWS 的真机整体验收 = M4(需启动壳 + 真喊)。
+
 ## 范围外(v1 不做)
 - Spotify(登录/Premium/SDK,见 decisions/0006);歌单/上一首下一首/音量语音控制(先单曲播放/停);
   歌词显示;本机音乐文件(需求是在线流)。
