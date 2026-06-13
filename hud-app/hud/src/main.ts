@@ -3,7 +3,7 @@
 
 import "./styles.css";
 import { RingHud } from "./hud/ring-hud.ts";
-import { AudioEngine, base64ToBytes, blobToBase64, parseMusicIntent } from "./voice/audio.ts";
+import { AudioEngine, base64ToBytes, blobToBase64 } from "./voice/audio.ts";
 import { VoiceMachine } from "./voice/machine.ts";
 import { VoiceRpc, wsUrl } from "./voice/rpc.ts";
 
@@ -40,25 +40,6 @@ machine.onChange((s) => {
 let busy = false;
 let lastReply = ""; // 回声过滤:记住上一句 TTS 内容
 let resumeMusic: () => void = () => {}; // duck/resume around STT windows
-
-// Phase 4 music command (front-end intent trigger). Returns true if the
-// utterance was a music command and was handled here (caller skips the LLM).
-// Backend tool-driven triggering is the alternative — see decisions/0006.
-function handleMusic(text: string): boolean {
-  const intent = parseMusicIntent(text);
-  if (!intent) {
-    return false;
-  }
-  if (intent.action === "stop") {
-    audio.stopMusic();
-    lastReply = "好,停了。";
-  } else {
-    void audio.playMusic(intent.query);
-    lastReply = `好,放${intent.query}。`;
-  }
-  replyEl.textContent = `Jarvis: ${lastReply}`;
-  return true;
-}
 
 // 去掉标点空白只留字词,回声比对不受标点差异干扰
 const normalize = (s: string): string => s.replace(/[^\p{L}\p{N}]/gu, "");
@@ -155,18 +136,8 @@ async function endTurn(): Promise<string | null> {
     youEl.textContent = `you: ${text}`;
     machine.send("TRANSCRIBED"); // → thinking
 
-    // Music command: handle locally, skip the LLM/TTS (music itself is the
-    // audio). resumeMusic is reset so the finally won't un-duck over playback.
-    if (handleMusic(text)) {
-      resumeMusic = () => {};
-      machine.send("REPLIED"); // → speaking (skip TTS)
-      return text;
-    }
-
-    const reply = DISMISS_RE.test(text) ? "好,我退下了。" : await (async () => {
-      log("thinking…");
-      return rpc.submitPrompt(text);
-    })();
+    log("thinking…");
+    const reply = await rpc.submitPrompt(text);
     replyEl.textContent = `Jarvis: ${reply}`;
     lastReply = reply;
     machine.send("REPLIED"); // → speaking
@@ -198,8 +169,7 @@ const WAKE_SILENCE_MS = 1200; // end a turn after this much trailing silence
 const WAKE_WAIT_SPEECH_MS = 5000; // give the user this long to start talking
 const WAKE_MAX_MS = 15000; // hard cap per listening window
 const WAKE_LEVEL = 0.08;
-const DISMISS_RE = /退下|再见|拜拜/;
-const GREETINGS = ["我在,请讲。", "在的,有什么吩咐?", "先生,随时待命。", "你好 BOSS,我是贾维斯,有什么可以为你效劳?"];
+const GREETINGS =["我在,请讲。", "在的,有什么吩咐?", "先生,随时待命。", "你好 BOSS,我是贾维斯,有什么可以为你效劳?"];
 
 let conversing = false;
 
@@ -273,16 +243,6 @@ async function wakeTurn(): Promise<void> {
         log("(对话结束 — 未听到指令)");
         break;
       }
-      if (DISMISS_RE.test(text)) {
-        log("(贾维斯退下,喊名字再唤醒)");
-        break;
-      }
-      // 放歌后退出对话循环,免按住模式下"一直在听"会一直 duck 掉音乐 →
-      // 放歌等于没放。退出后音乐畅放,喊"贾维斯"可再唤醒来"停/换"。
-      if (parseMusicIntent(text)?.action === "play") {
-        log("(放歌中,退出对话;喊贾维斯可再唤醒)");
-        break;
-      }
     }
   } finally {
     conversing = false;
@@ -305,10 +265,6 @@ async function textTurn(text: string): Promise<void> {
   youEl.textContent = `you: ${text}`;
   machine.send("TRANSCRIBED"); // → thinking
   try {
-    if (handleMusic(text)) {
-      machine.send("REPLIED");
-      return;
-    }
     log("thinking…");
     const reply = await rpc.submitPrompt(text);
     replyEl.textContent = `Jarvis: ${reply}`;
