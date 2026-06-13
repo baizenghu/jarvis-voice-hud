@@ -29,6 +29,7 @@
 | [open-questions.md](open-questions.md) | 仍待拍板的事项 |
 | [topics/music-vs-asr-isolation.md](topics/music-vs-asr-isolation.md) | 放歌不干扰 KWS/STT 的分层防御策略(Phase 4 硬约束) |
 | [design-agent-orchestration.md](design-agent-orchestration.md) | **架构重构**:控制权倒转 = agent 编排 + 薄客户端(取代前端语义触发) |
+| [impl-plan-agent-orchestration.md](impl-plan-agent-orchestration.md) | 上文设计的可执行实现计划(Phase 0 阻塞门 minimaxi tools → 后端工具 → skill → 薄客户端 → 真机) |
 | [decisions/0001-audio-capture-location.md](decisions/0001-audio-capture-location.md) | 为何音频在前端采集,而非 Python 主机 |
 | [decisions/0002-shell-and-visuals.md](decisions/0002-shell-and-visuals.md) | Tauri v2 外壳 + WebGL HUD |
 | [decisions/0003-activation-wake-word.md](decisions/0003-activation-wake-word.md) | 唤醒方式 = 喊它名字 |
