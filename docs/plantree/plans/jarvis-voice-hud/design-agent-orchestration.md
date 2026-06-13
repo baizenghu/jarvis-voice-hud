@@ -1,6 +1,7 @@
 # 设计:控制权倒转 —— agent 编排 + 薄客户端
 
-日期:2026-06-12。状态:设计成稿,待写实现计划。
+日期:2026-06-12。状态:设计成稿 + Codex 审查并经代码核实纳入,待写实现计划。
+> 核实修正:① agent 与 WakeHub 同进程**已证实**(server.py in-process AIAgent),主路径成立;② Codex"MiniMax 走 anthropic_messages、extra_body no-op"经核实**不适用本配置**(家里 `provider:custom`+minimaxi→`chat_completions`,extra_body 生效、OpenAI 工具格式);③ 暴露真正头道门 = minimaxi 端点是否支持 OpenAI `tools`。
 > 本文是 Phase 4 之上的**架构重构设计**,经 brainstorming 逐节确认。它**取代**前期"前端意图识别/标记"那套触发(见 [decisions/0006](decisions/0006-music-playback-in-webview.md) 仍管 webview 播放+中心中转,**只换触发层**)。
 
 ## 背景与问题
@@ -48,14 +49,19 @@ loop:
 
 **无 `speak` 工具**:agent 要说的话走正常回复(`message.complete`),前端 TTS 念。工具只管动作。
 **fire-and-forget**:工具推完即返回成功,agent 照常说"好,放晴天";播放失败由前端本地兜底,不阻塞 agent。
+**工具做成 gateway/HUD 本地工具(toolset `voice_hud`),不进核心 hermes tool registry**(契合薄客户端、限制爆炸半径)。
+**schema 最紧**:除 `play_music.query` 外不加可选字段(MiniMax 只有宽松 schema 兼容补丁、无稳定保证,见风险)。
 
-## Agent → HUD 动作事件协议(走现有 `/api/events`)
-HUD 本就订阅 `/api/events`(收 wake)。统一动作事件(JSON):
+## Agent → HUD 动作事件协议(走现有 `/api/events`,in-process WakeHub 广播)
+HUD 本就订阅 `/api/events`(收 wake)。统一动作事件(JSON,带 `turn` 标识):
 ```
-{type:"wake"} {type:"play_music",query:"晴天"} {type:"stop_music"} {type:"end_session"}
+{type:"wake"} {type:"play_music",query:"晴天",turn:N} {type:"stop_music",turn:N} {type:"end_session",turn:N}
 ```
-- **接线**(writing-plans 第一件钉死):工具 handler 与 dev_server 同进程 → 直接 `hub.broadcast(event)`;
-  若分进程 → 经 `/api/pub`(event_publisher 已有此路)。
+- **接线(已核实成立)**:网关 agent 是 **in-process AIAgent**(`tui_gateway/server.py` 多处 "in-process agent")→ 与
+  dev_server 模块级 `WakeHub` 同进程,工具 handler 直接 `hub.broadcast(event)`。**实现注意**:handler 可能在线程池跑,
+  广播须用 `safe_schedule_threadsafe`(ws.py 已用)投回事件循环。
+- **`/api/pub` 兜底删除**:dev_server **没有** `/api/pub`;hermes 原生事件脊(TUI `_emit`/工具进度/dashboard sidecar)
+  **不能**当 dev-server→HUD 命令通道。`WakeHub.broadcast` 是**唯一**命令路径,不另造第二条总线。
 
 ## play-music skill(语义判断的归宿)
 `skills/media/play-music/SKILL.md` —— 教 agent 何时/怎么调 `play_music`(纠正同音字、抽真实歌名、未指定→query=""、想停→stop_music;调完用一句口语确认)。
@@ -66,15 +72,17 @@ HUD 本就订阅 `/api/events`(收 wake)。统一动作事件(JSON):
 - agent 一轮超时/无 message.complete → 前端**加超时**(现无限等),超时念"没听清,再说一次?"回 listen。
   (**前端自主说话仅限两处**:wake 固定招呼 + 此超时兜底;其余话全由 agent 出。)
 - play_music 播放失败(resolve 502/解码)→ 前端本地兜底:界面提示+日志,不自主说话,会话继续。
-- end_session + 同轮 play_music → 先播再隐身;**隐身不停音乐**(音乐元素与 overlay 可见性解耦)→ 退下后音乐继续。
-- KWS 会话期过敏重触 → 整会话报 busy 抑制(扩展现有 per-turn busy 到 whole-session)。
+- **轮内事件缓冲 vs message.complete 时序(竞态)**:每个动作事件带 `turn` 号;message.complete 到达后**再排空 ~50ms 窗口**收尾随事件,丢弃 `turn` 过期的事件。
+- **end_session + 同轮 play_music 排序**:**确定性排序键**——play_music 永远先于 end_session 执行,不靠到达顺序;**隐身不停音乐**(音乐元素与 overlay 可见性解耦)→ 退下后音乐继续。
+- **会话期 busy 抑制(状态机)**:扩展现有 per-turn busy 到 whole-session;**busy 仅在 end_session handler 完成(或超时恢复)后才清**,不在 message.complete 清——否则 TTS 念到一半第二个唤醒词就触发。
 - 网关重启 → rpc.ts/connectEvents 已有自动重连,保留。
 
 ## 测试
 - 前端单测(vitest):动作事件→handler 分发;**轮内动作缓冲与排序**(play 延到 TTS 后)用 mock;VAD/静音/回声。删 parseMusicDirective 测试。
 - 后端单测(pytest):三工具 handler 推正确事件(mock hub.broadcast);/api/music 代理(现有保留)。
 - 真机验收门(家里):喊贾维斯→"放首晴天"→agent 调 play_music→出声+跳动;"退下"→end_session→隐身。
-- ⚠️ **头号风险 = 工具调用可靠性**:MiniMax-M3 对短语音指令能否**稳定调 play_music**。只能真机测;不稳→强化工具描述/加 SOUL 指针。
+- 🔴 **可行性头道门(writing-plans/真机先验)= api.minimaxi.com/v1 是否支持 OpenAI `tools` 函数调用**。已核实:家里 `provider: custom` + minimaxi base_url → `api_mode=chat_completions`(**非** anthropic_messages,Codex 那条是内建 MiniMax 的事、不适用本配置),故 `extra_body.thinking.disabled` 真生效、工具走 **OpenAI function-calling 格式**。但 minimaxi 端点是否真支持 `tools` 参数,代码层验不了,必须先打一个真 tools 请求确认——**不支持则整方案前提不成立**(那时换 provider 或换模型)。
+- ⚠️ **头号风险 = 工具调用可靠性**:即便端点支持 tools,MiniMax-M3 对短语音指令能否**稳定调 play_music**(模型行为,与 api_mode 无关)。只能真机测。缓解:schema 最紧 + skill playbook;**设可接受漏调阈值,不达标就把本会话路由到工具调用更稳的模型(如 Claude Haiku,走 anthropic_messages)**,而非无限补提示词;最后才考虑加 SOUL 指针。
 
 ## 迁移路径
 - 新分支 `feat/voice-hud-agent-orchestration` 做;现 Phase 3 loop 在 git 可回退。
