@@ -98,14 +98,8 @@ async def run(query, stop):
     st = await js("var x=document.querySelector('audio'); x?JSON.stringify({paused:x.paused,ct:x.currentTime}):'none'")
     state = json.loads(st) if st and st != "none" else {}
     if res == "ok" and state.get("paused") is False and (state.get("ct") or 0) > 0:
-        # 最小化浏览器窗口,别盖住 HUD 光圈(音乐是音频,最小化不影响播放)
-        try:
-            win = await cmd("Browser.getWindowForTarget")
-            wid = win.get("windowId")
-            if wid:
-                await cmd("Browser.setWindowBounds", {"windowId": wid, "bounds": {"windowState": "minimized"}})
-        except Exception:
-            pass
+        # 不最小化窗口:最小化会让页面 hidden,歌曲宝随即暂停音乐。让 HUD 光圈靠
+        # always-on-top 盖在浏览器之上来解决遮挡问题(见前端 keep-above 重申)。
         print(f"PLAYING: {query}")
     else:
         print(f"FAILED: play={res} state={st}")
