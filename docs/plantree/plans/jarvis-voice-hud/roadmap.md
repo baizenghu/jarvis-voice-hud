@@ -87,8 +87,10 @@ clawtouch(Pico HID + 本地 stdio MCP)。目标机已探明:Win11 24H2、原生 
 (收文本→判断→调 `play_music`/`stop_music`/`end_session` 工具 + 出话)→ 前端退化薄客户端执行。
 音乐改由 **agent 工具**触发(取代前端意图识别),decisions/0006 的 webview 播放+中心中转不变。
 - **进展(分支 `feat/voice-hud-agent-orchestration`)**:Phase 0-3 完成,单测/contract/build/lint + **0.3 全链路 smoke 3/3** 全绿;
-  头号风险(MiniMax 工具调用)在真 agent 路径已验稳。关键坑:工具须 monkeypatch 网关 `_load_enabled_toolsets` 才进 agent 清单(`b8410e7`)。
-- **剩 Phase 4**:真机部署家里 + 语音验收(动实时设备)。
+  头号风险(MiniMax 工具调用)在真 agent 路径已验稳。关键坑:voice_hud 工具须 monkeypatch 网关 `_load_enabled_toolsets`(`b8410e7`)。
+- **真机已部署家里 + 放歌跑通(2026-06-13,真机能听到,16s)**:agent 加载 play-music skill → `terminal` 跑 `hud-app/gequbao_play.py "<歌>"`(CDP 浏览器自动化:起 debug Chrome 过 Cloudflare→搜歌曲宝→直接导航 /music/ 详情页→`audio.play()`)。
+  **clawtouch 三件套全装好并验通**(Pico2 刷 clawtouch-hid 固件、clawtouch-mcp 接 hermes 截屏+HID、clawtouch-skills);但**放歌弃用 clawtouch vision 点击(又慢又脆),改用 gequbao_play.py 脚本**。clawtouch 留作通用"操作电脑"。
+- 踩坑见 memory/HANDOFF:详情页播放键是切换键(只 audio.play 别点)、Pico 鼠标加速要 flat、Cloudflare 需关梯子。
 设计/计划见 [design-agent-orchestration.md](design-agent-orchestration.md) / [impl-plan-agent-orchestration.md](impl-plan-agent-orchestration.md)。
 
 ## 延后
