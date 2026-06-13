@@ -26,6 +26,18 @@ CHROME_ENV = {
 }
 
 
+def signal_music(on: bool):
+    """告诉 HUD 网关「真在放歌」与否,驱动光圈粉色音乐态(避免 TTS/杂音误触发)。"""
+    gw_port = os.environ.get("PORT", "8765")
+    try:
+        urllib.request.urlopen(urllib.request.Request(
+            f"http://127.0.0.1:{gw_port}/api/music_state",
+            data=json.dumps({"on": on}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST"), timeout=2).read()
+    except Exception:
+        pass
+
+
 def cdp_targets():
     try:
         return json.load(urllib.request.urlopen(f"http://127.0.0.1:{PORT}/json", timeout=4))
@@ -75,6 +87,7 @@ async def run(query, stop):
     await cmd("Page.enable")
     if stop:
         await js("var x=document.querySelector('audio'); if(x){x.pause()}")
+        signal_music(False)
         print("STOPPED"); return
 
     await cmd("Page.navigate", {"url": "https://www.gequbao.com/s/" + query})
@@ -100,6 +113,7 @@ async def run(query, stop):
     if res == "ok" and state.get("paused") is False and (state.get("ct") or 0) > 0:
         # 不最小化窗口:最小化会让页面 hidden,歌曲宝随即暂停音乐。让 HUD 光圈靠
         # always-on-top 盖在浏览器之上来解决遮挡问题(见前端 keep-above 重申)。
+        signal_music(True)
         print(f"PLAYING: {query}")
     else:
         print(f"FAILED: play={res} state={st}")

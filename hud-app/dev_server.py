@@ -263,6 +263,15 @@ async def audio_level(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "clients": n})
 
 
+@app.post("/api/music_state")
+async def music_state(request: Request) -> JSONResponse:
+    """播放器真实放歌状态(gequbao_play.py 放上/停时 POST)。HUD 据此进/出粉色
+    音乐态,避免 TTS、系统杂音按音量误触发。"""
+    d = await request.json()
+    n = await hub.broadcast({"type": "music_state", "on": bool(d.get("on"))})
+    return JSONResponse({"ok": True, "clients": n})
+
+
 # --- Phase 4 music proxy (M1) ---------------------------------------------
 # "Play a song" plays IN the HUD webview via <audio src="/api/music?q=...">, so
 # the existing Web Audio analyser sees it and the voiceprint core dances (see

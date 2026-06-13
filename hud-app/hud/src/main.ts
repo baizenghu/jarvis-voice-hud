@@ -33,18 +33,22 @@ rpc.onStatus = (s) => {
 // 外部声级:音乐在独立 Chrome 出声,webview analyser 看不到。audio_levels.py 从
 // 系统 sink monitor 算出频段经 /api/events 推来(type:"audio"),新鲜(<400ms)时
 // 优先用它驱动光圈+背景,否则回落到 webview analyser。
+// 粉色音乐态只在「播放器真的在放歌」时开(gequbao_play 发 music_state 信号),
+// 不靠音量——否则 TTS(同走此 sink)和系统杂音都会误触发粉色。频段强度仍由
+// audio_levels 从系统 monitor 提供;非音乐态的脉动回落到 webview analyser。
 let extBands = { bass: 0, mid: 0, treble: 0 };
 let extTs = 0;
+let musicOn = false;   // 播放器真在放歌(music_state 事件驱动)
+let lastLoud = 0;      // 最近一次系统输出够响的时刻
 const extFresh = (): boolean => performance.now() - extTs < 400;
-// 外部音乐是否在响(系统输出有声且数据新鲜)。webview 音乐已废,只看外部。
-const musicPlaying = (): boolean =>
-  extFresh() && extBands.bass + extBands.mid + extBands.treble > 0.05;
+// 音乐态:报了 on 且最近 4s 内确有声(歌停/静音/--stop 后自动收回)。
+const musicPlaying = (): boolean => musicOn && performance.now() - lastLoud < 4000;
 
 const hud = new RingHud(canvas);
 hud.getState = () => machine.state;
 hud.getLevel = () => audio.getLevel();
-hud.getBands = () => (extFresh() ? extBands : audio.getBands());
-hud.getMusicActive = () => musicPlaying() || audio.isMusicPlaying();
+hud.getBands = () => (musicPlaying() && extFresh() ? extBands : audio.getBands());
+hud.getMusicActive = () => musicPlaying();
 hud.start();
 
 machine.onChange((s) => {
@@ -113,11 +117,21 @@ function connectEvents(): void {
       bass?: number;
       mid?: number;
       treble?: number;
+      on?: boolean;
     };
     switch (msg.type) {
     case "audio":
       extBands = { bass: msg.bass ?? 0, mid: msg.mid ?? 0, treble: msg.treble ?? 0 };
       extTs = performance.now();
+      if (extBands.bass + extBands.mid + extBands.treble > 0.05) {
+        lastLoud = extTs;
+      }
+      break;
+    case "music_state":
+      musicOn = msg.on ?? false;
+      if (musicOn) {
+        lastLoud = performance.now();
+      }
       break;
     case "wake":
       log("唤醒:贾维斯");
