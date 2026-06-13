@@ -164,26 +164,41 @@ def _register_voice_hud_tools() -> None:
     )
 
 
-def _enabled_toolsets_for_session() -> list[str] | None:
-    """The session agent's enabled toolsets, with voice_hud merged in.
-
-    The gateway builds its agent with enabled_toolsets=_load_enabled_toolsets()
-    (HERMES_TUI_TOOLSETS / CLI config), which would NOT include voice_hud — so
-    merely registering the tools is not enough for the agent to see them. None
-    means "all toolsets" (the default-everything path already covers the
-    registry-registered voice_hud), so leave it as-is; otherwise append.
-    """
-    from tui_gateway.server import _load_enabled_toolsets
-
-    base = _load_enabled_toolsets()
+def _merge_voice_hud(base: list[str] | None) -> list[str] | None:
+    """Add voice_hud to an enabled-toolsets list. None means 'all' (already covers it)."""
     if base is None:
         return None
-    if "voice_hud" not in base:
-        return [*base, "voice_hud"]
-    return base
+    return base if "voice_hud" in base else [*base, "voice_hud"]
+
+
+def _patch_enabled_toolsets() -> None:
+    """Make the gateway agent actually SEE voice_hud.
+
+    The gateway builds its agent with enabled_toolsets=_load_enabled_toolsets()
+    (its own module-level fn). That returns a concrete CLI/config list that does
+    NOT include voice_hud, so merely registering the tools leaves them invisible
+    to the agent (confirmed: 0.3 smoke — agent chatted instead of calling
+    play_music). Wrap that module fn so every agent build merges voice_hud in.
+    """
+    import tui_gateway.server as _gw
+
+    _orig = _gw._load_enabled_toolsets
+
+    def _patched() -> list[str] | None:
+        return _merge_voice_hud(_orig())
+
+    _gw._load_enabled_toolsets = _patched
+
+
+def _enabled_toolsets_for_session() -> list[str] | None:
+    """Contract-test view: enabled toolsets with voice_hud merged in."""
+    from tui_gateway.server import _load_enabled_toolsets
+
+    return _merge_voice_hud(_load_enabled_toolsets())
 
 
 _register_voice_hud_tools()
+_patch_enabled_toolsets()
 
 
 @app.websocket("/api/events")
