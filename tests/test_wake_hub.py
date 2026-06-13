@@ -19,6 +19,45 @@ def _load():
     return mod
 
 
+def test_broadcast_emits_to_clients():
+    ds = _load()
+    hub = ds.WakeHub()
+    sent = []
+
+    class FakeWS:
+        async def send_json(self, m):
+            sent.append(m)
+
+    hub.clients.add(FakeWS())
+    import asyncio
+
+    n = asyncio.run(hub.broadcast({"type": "play_music", "query": "晴天"}))
+    assert sent[-1] == {"type": "play_music", "query": "晴天"}
+    assert n == 1
+
+
+def test_broadcast_drops_dead_clients():
+    ds = _load()
+    hub = ds.WakeHub()
+
+    class GoodWS:
+        async def send_json(self, m):
+            pass
+
+    class DeadWS:
+        async def send_json(self, m):
+            raise RuntimeError("closed")
+
+    good = GoodWS()
+    hub.clients.add(good)
+    hub.clients.add(DeadWS())
+    import asyncio
+
+    n = asyncio.run(hub.broadcast({"type": "stop_music"}))
+    assert n == 1
+    assert hub.clients == {good}
+
+
 def test_wake_gating():
     ds = _load()
     hub = ds.WakeHub()

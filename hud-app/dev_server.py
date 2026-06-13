@@ -81,6 +81,18 @@ class WakeHub:
             self.idle_since = now
         self.busy = busy
 
+    async def broadcast(self, event: dict) -> int:
+        """Push an action event to all HUD /api/events clients. Returns live count."""
+        dead = []
+        for c in self.clients:
+            try:
+                await c.send_json(dict(event))
+            except Exception:
+                dead.append(c)
+        for c in dead:
+            self.clients.discard(c)
+        return len(self.clients)
+
 hub = WakeHub()
 
 
