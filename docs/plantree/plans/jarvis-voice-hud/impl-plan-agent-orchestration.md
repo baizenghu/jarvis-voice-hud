@@ -10,6 +10,8 @@
 
 **分支:** `feat/voice-hud-agent-orchestration`(新分支,现 Phase 3 loop 可回退)。
 
+**复核:** 经 Codex 审查 + 代码核实修正(2026-06-13):schema 须 `{description,parameters}`、handler 收 `(args,**kw)`、`safe_schedule_threadsafe(coro,loop)` loop 必传、voice_hud 须并进 `enabled_toolsets`、turn-id 移除改串行+clear/drain、0.2 产出可执行 contract 测试、新增 0.3 全链路工具调用闸门、关键触发规则进工具 description。
+
 ---
 
 ## 文件结构
@@ -79,9 +81,35 @@ Run: `grep -rn "toolset\|enabled_toolsets\|get_definitions\|allowed" tui_gateway
 确认 handler 与 dev_server 同进程(已核实 in-process agent),设计接入方式:dev_server 启动时把 `hub.broadcast` 作为回调注入 `voice_hud_tools`(模块级 setter),handler 调用它。确认 `safe_schedule_threadsafe` 用法:
 Run: `grep -n "safe_schedule_threadsafe" tui_gateway/ws.py agent/async_utils.py`
 
-- [ ] **Step 4: 把契约写进本文件附录并 commit**
+- [ ] **Step 4: 产出可执行 contract 测试(非笔记)+ commit**
 
-附录写明:register 调用模板、handler 签名、schema 形状、toolset 启用点、广播回调注入方式。后续 Phase 1 严格按此写。
+不只写附录笔记——写一个 `tests/test_voice_hud_contract.py`,断言已核实的契约,作为 Phase 1 骨架替换前的护栏:
+```python
+# 断言契约成立,任一处变了就红
+def test_register_and_definition_shape():
+    import sys; sys.path.insert(0,"hud-app"); import dev_server  # 触发注册
+    from model_tools import get_tool_definitions
+    defs = get_tool_definitions(enabled_toolsets=dev_server._enabled_toolsets_for_session())
+    fn = next(d["function"] for d in defs if d["function"]["name"] == "play_music")
+    assert fn["parameters"]["properties"]["query"]["type"] == "string"   # parameters 层级正确
+```
+Run: `.venv/bin/python -m pytest tests/test_voice_hud_contract.py -v` → 通过即契约锁定。附录同步写明 register 模板/handler 签名/schema 形状/toolset 启用点/loop 注入。
+
+---
+
+### Task 0.3: 全链路工具调用 smoke(curl 不够,验 hermes 适配器+registry+toolset 组合)
+
+**Files:** 临时脚本,不入库。
+
+- [ ] **Step 1: 真实路径发一次 prompt,确认产生 tool call**
+
+0.1 的 curl 只验 minimaxi 端点;还要验 **hermes chat_completions 适配器 + registry schema + enabled_toolsets 三者组合后真把工具发给模型、且模型回 tool call**。
+注册好 voice_hud 工具后(Phase 1 Task 1.3 完成后回跑此 smoke),起 dev_server,经 `/api/ws` 发 `prompt.submit`("放首晴天"),抓 hermes 发往 minimaxi 的请求体确认含 `tools`,且响应/回合产生 `play_music` tool call(可临时让 `_safe_emit` 打日志观测)。
+Run: 裸测脚本 `ws_tool_smoke.py`(仿 `hud-app/ws_smoke.py`)→ 观测到 play_music handler 被触发。
+- 触发 → 全链路通,Phase 3/4 可放心铺。
+- 未触发 → 在进前端前先解决(toolset 没进 / schema 错 / 模型不调),**别带病往下**。
+
+> 顺序:Task 0.1(端点能力)先行;0.2/0.3 的"真实路径"部分依赖 Phase 1 Task 1.1-1.3 完成 → 0.3 实际在 Phase 1 后、Phase 3 前作为闸门跑。0.2 的 contract 测试在 Task 1.3 后即可跑。
 
 ---
 
@@ -93,11 +121,13 @@ Run: `grep -n "safe_schedule_threadsafe" tui_gateway/ws.py agent/async_utils.py`
 - Modify: `hud-app/dev_server.py`(WakeHub 类)
 - Test: `tests/test_wake_hub.py`
 
+> **turn-id 已移除**(Codex 复核):原计划在 `set_busy(True)` 自增 turn,但整会话只 busy 一次→turn 不随多轮 prompt 走,隔离不了迟到动作。会话内 prompt.submit **本就串行**(前端 await message.complete 再听下一轮),改用"录音起始清缓冲 + complete 后 drain"即可(见 Task 3.x),WakeHub 不需要 turn。
+
 - [ ] **Step 1: 写失败测试**
 
 ```python
 # tests/test_wake_hub.py 追加
-def test_broadcast_increments_turn_and_emits():
+def test_broadcast_emits_to_clients():
     ds = _load()
     hub = ds.WakeHub()
     sent = []
@@ -105,15 +135,14 @@ def test_broadcast_increments_turn_and_emits():
         async def send_json(self, m): sent.append(m)
     hub.clients.add(FakeWS())
     import asyncio
-    t1 = asyncio.get_event_loop().run_until_complete(hub.broadcast({"type": "play_music", "query": "晴天"}))
-    assert sent[-1]["type"] == "play_music"
-    assert sent[-1]["query"] == "晴天"
-    assert "turn" in sent[-1] and isinstance(sent[-1]["turn"], int)
+    n = asyncio.get_event_loop().run_until_complete(hub.broadcast({"type": "play_music", "query": "晴天"}))
+    assert sent[-1] == {"type": "play_music", "query": "晴天"}
+    assert n == 1
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `.venv/bin/python -m pytest tests/test_wake_hub.py::test_broadcast_increments_turn_and_emits -v`
+Run: `.venv/bin/python -m pytest tests/test_wake_hub.py::test_broadcast_emits_to_clients -v`
 Expected: FAIL(`WakeHub` 无 `broadcast`)。
 
 - [ ] **Step 3: 实现 broadcast**
@@ -122,19 +151,16 @@ Expected: FAIL(`WakeHub` 无 `broadcast`)。
 ```python
     async def broadcast(self, event: dict) -> int:
         """Push an action event to all HUD /api/events clients. Returns live client count."""
-        payload = dict(event)
-        payload.setdefault("turn", self.turn)
         dead = []
         for c in self.clients:
             try:
-                await c.send_json(payload)
+                await c.send_json(dict(event))
             except Exception:
                 dead.append(c)
         for c in dead:
             self.clients.discard(c)
         return len(self.clients)
 ```
-并在 `__init__` 加 `self.turn = 0`;在 `set_busy(True)` 时 `self.turn += 1`(每轮自增,供前端丢弃过期事件)。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -203,20 +229,22 @@ def set_broadcast(fn: Callable[[dict], None]) -> None:
     global _broadcast
     _broadcast = fn
 
-def play_music_handler(params: dict) -> str:
-    query = (params.get("query") or "").strip()
+# handler 签名须为 (args, **kw):registry.dispatch 调 handler(args, **kwargs),
+# 会带 task_id 等 kw,单参 handler 会 TypeError。(已核实 registry.py dispatch)
+def play_music_handler(args: dict, **kw) -> str:
+    query = (args.get("query") or "").strip()
     _broadcast({"type": "play_music", "query": query})
     return f"已开始播放: {query or '热门音乐'}"
 
-def stop_music_handler(params: dict) -> str:
+def stop_music_handler(args: dict, **kw) -> str:
     _broadcast({"type": "stop_music"})
     return "已停止"
 
-def end_session_handler(params: dict) -> str:
+def end_session_handler(args: dict, **kw) -> str:
     _broadcast({"type": "end_session"})
     return "会话结束"
 ```
-（注:handler 入参/返回若 Task 0.2 契约不同,按契约调整,但保持 set_broadcast 注入点不变。）
+测试调用同步桩 `m.play_music_handler({"query":"晴天"})` 仍可(kw 可省)。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -239,43 +267,62 @@ git commit -m "feat(voice-hud): voice_hud 三工具 handler(fire-and-forget 推�
 
 - [ ] **Step 1: 注册 + 注入(dev_server 启动)**
 
-在 `gateway_voice_patch.register()` 附近加:
+在 `gateway_voice_patch.register()` 附近加。**schema 必须是 `{"description":..., "parameters":{...}}`**——
+已核实 `registry.get_definitions` 做 `{**entry.schema,"name":entry.name}` 当 OpenAI `function` 对象,
+裸 JSON Schema 会让 type/properties 跑到 function 顶层、缺 `parameters`:
 ```python
 import voice_hud_tools
-from tools.registry import registry  # 路径以 Task 0.2 确认为准
+from tools.registry import registry
 
 def _register_voice_hud_tools() -> None:
-    voice_hud_tools.set_broadcast(lambda e: _safe_emit(e))   # _safe_emit 见 Step 2
+    voice_hud_tools.set_broadcast(_safe_emit)   # _safe_emit 见 Step 2
     registry.register(
         name="play_music", toolset="voice_hud",
-        schema={"type": "object", "properties": {"query": {"type": "string",
-                "description": "歌名或歌手,空=热门"}}, "required": ["query"]},
+        schema={"description": "在语音 HUD 播放在线音乐(用户想听歌/换歌时调用)",
+                "parameters": {"type": "object",
+                    "properties": {"query": {"type": "string", "description": "歌名或歌手,空=热门"}},
+                    "required": ["query"]}},
         handler=voice_hud_tools.play_music_handler,
         description="在语音 HUD 播放在线音乐(用户想听歌/换歌时调用)")
     registry.register(name="stop_music", toolset="voice_hud",
-        schema={"type": "object", "properties": {}},
+        schema={"description": "停止音乐播放", "parameters": {"type": "object", "properties": {}}},
         handler=voice_hud_tools.stop_music_handler, description="停止音乐播放")
     registry.register(name="end_session", toolset="voice_hud",
-        schema={"type": "object", "properties": {}},
-        handler=voice_hud_tools.end_session_handler, description="结束本次语音对话、HUD 隐身(用户说退下/再见时调用)")
+        schema={"description": "结束本次语音对话、HUD 隐身(用户说退下/再见时调用)",
+                "parameters": {"type": "object", "properties": {}}},
+        handler=voice_hud_tools.end_session_handler,
+        description="结束本次语音对话、HUD 隐身(用户说退下/再见时调用)")
 
 _register_voice_hud_tools()
-# 若 Task 0.2 显示 toolset 需显式启用,在此把 "voice_hud" 加进 agent 的 enabled toolsets。
 ```
+**enabled_toolsets 启用(关键,已核实)**:agent 用 `enabled_toolsets=_load_enabled_toolsets()`(读 HERMES_TUI_TOOLSETS/CLI 配置,有则不含 voice_hud)→ 仅 register **不等于**进 agent.tools。两种启用法,二选一(Task 0.2 定):
+- 简单:dev_server 启动设 `os.environ["HERMES_TUI_TOOLSETS"]` 在现有值基础上**追加** `voice_hud`(别覆盖);
+- 或在构建该会话 agent 处把 `voice_hud` 合并进 `enabled_toolsets`。
 
-- [ ] **Step 2: 实现线程安全广播 `_safe_emit`**
+- [ ] **Step 2: 实现线程安全广播 `_safe_emit`(loop 必传)**
 
-handler 可能在线程池跑,需把异步 `hub.broadcast` 投回事件循环:
+已核实签名 `safe_schedule_threadsafe(coro, loop, *, ...)`,**loop 必传**。dev_server 启动时捕获 uvicorn 主 loop:
 ```python
+import asyncio
+from agent.async_utils import safe_schedule_threadsafe
+
+_main_loop: asyncio.AbstractEventLoop | None = None
+
+@app.on_event("startup")
+async def _capture_loop() -> None:
+    global _main_loop
+    _main_loop = asyncio.get_running_loop()
+
 def _safe_emit(event: dict) -> None:
-    from agent.async_utils import safe_schedule_threadsafe   # 以 Task 0.2 确认为准
-    safe_schedule_threadsafe(hub.broadcast(event))
+    safe_schedule_threadsafe(hub.broadcast(event), _main_loop)
 ```
 
-- [ ] **Step 3: 裸测注册成功**
+- [ ] **Step 3: 集成 smoke——证明工具进入 agent.tools(不只是注册成功)**
 
-Run: `.venv/bin/python -c "import sys; sys.path.insert(0,'hud-app'); import dev_server; from tools.registry import registry; print('play_music' in registry.get_all_tool_names())"`
-Expected: `True`。
+裸测 `registry.get_all_tool_names()` 只证注册、不证 toolset 过滤后模型可见。改为对**真实会话 agent** 断言:
+Run: `.venv/bin/python -c "import sys; sys.path.insert(0,'hud-app'); import dev_server; from model_tools import get_tool_definitions; defs=get_tool_definitions(enabled_toolsets=dev_server._enabled_toolsets_for_session()); names=[d['function']['name'] for d in defs]; print('play_music' in names, 'parameters' in (next(d['function'] for d in defs if d['function']['name']=='play_music')))"`
+Expected: `True True`(play_music 在 agent 工具清单里,且 function.parameters 结构正确)。
+（`_enabled_toolsets_for_session` = Step 1 启用法对应的 helper;若用环境变量法则直接 `_load_enabled_toolsets()`。）
 
 - [ ] **Step 4: Commit**
 
@@ -287,6 +334,8 @@ git commit -m "feat(voice-hud): 注册 voice_hud 工具进网关 agent + 线程�
 ---
 
 ## Phase 2 — play-music skill
+
+> **稳定触发靠工具 description(每轮可见),skill 是补充**(Codex 复核):skill 仅在按相关性进 prompt 时生效,短语音指令未必触发它;但工具 description("用户想听歌/换歌时调用")每轮都在 agent 工具清单里。故关键"何时调"规则放在 Task 1.3 的 `play_music` schema description,skill 提供同音纠错/抽歌名等 playbook 细节。Task 4.1 验收须确认**无需显式 `/play-music` 也能稳定调工具**。
 
 ### Task 2.1: 写 skill + 装到家里
 
@@ -421,29 +470,28 @@ git commit -m "feat(voice-hud): 会话驱动器动作排序(play 先于 end_sess
 **Files:**
 - Modify: `hud-app/hud/src/main.ts`、`hud-app/hud/src/voice/session.ts`
 
-- [ ] **Step 1: session.ts 加事件缓冲 + turn 过期丢弃(先测)**
+- [ ] **Step 1: session.ts 加 ActionBuffer(clear + drain,无 turn-id;先测)**
 
-测试(追加 session.test.ts):
+turns 串行 → 无需 turn-id;靠"录音起始 `clear()` 丢弃上一轮 straggler + complete 后 `drain()`"。测试:
 ```typescript
-import { TurnBuffer } from "./session.ts";
-it("丢弃 turn 过期的事件,只保留当前轮", () => {
-  const b = new TurnBuffer();
-  b.setTurn(5);
-  b.push({ type: "play_music", query: "a", turn: 4 }); // 过期
-  b.push({ type: "play_music", query: "b", turn: 5 });
-  expect(b.drain().map((x: any) => x.query)).toEqual(["b"]);
+import { ActionBuffer } from "./session.ts";
+it("clear 丢弃上一轮残留,drain 返回当前轮(已排序)", () => {
+  const b = new ActionBuffer();
+  b.push({ type: "end_session" });
+  b.push({ type: "play_music", query: "a" });
+  b.clear();                                   // 模拟新一轮录音起始
+  b.push({ type: "end_session" });
+  b.push({ type: "play_music", query: "b" });
+  expect(b.drain().map((x) => x.type)).toEqual(["play_music", "end_session"]); // 排序 + 只当前轮
+  expect(b.drain()).toEqual([]);               // drain 后清空
 });
 ```
 实现:
 ```typescript
-export class TurnBuffer {
-  private turn = 0;
-  private buf: (Action & { turn?: number })[] = [];
-  setTurn(t: number): void { this.turn = t; }
-  push(ev: Action & { turn?: number }): void {
-    if (ev.turn != null && ev.turn < this.turn) return; // 过期丢弃
-    this.buf.push(ev);
-  }
+export class ActionBuffer {
+  private buf: Action[] = [];
+  clear(): void { this.buf = []; }
+  push(ev: Action): void { this.buf.push(ev); }
   drain(): Action[] { const out = orderActions(this.buf); this.buf = []; return out; }
 }
 ```
@@ -457,32 +505,57 @@ Run: `cd hud-app/hud && npm test -- session` → PASS。
 - submitPrompt **加超时**(如 30s):超时念"没听清,再说一次?"回 listen。
 - busy 仅在 end_session 执行完 / 超时恢复后清。
 
+把会话循环抽成**可注入依赖**的纯函数 `runSession(deps)`(deps = {listen, submitPrompt, speak, playMusic, stopMusic, setHudVisible, reportState, sleep, buffer, timeoutMs}),便于 fake-timer 测试:
 ```typescript
-// main.ts 关键骨架(替换原 wakeTurn/endTurn 编排)
-async function runSession(): Promise<void> {
-  reportState("busy"); setHudVisible(true);
-  await speak(pickGreeting());            // 固定招呼(前端自主说话之一)
+// session.ts:可注入的会话循环
+export async function runSession(d: SessionDeps): Promise<void> {
+  d.reportState("busy"); d.setHudVisible(true);
+  await d.speak(d.pickGreeting());          // 固定招呼(前端自主说话之一)
   try {
     for (;;) {
-      const text = await autoListen();    // 复用现有录音/VAD/回声/静音逻辑
-      if (text == null) continue;         // 无人声/回声:继续听(不结束——结束由 agent 决定)
-      buffer.setTurn(/* 取本轮 turn:可用收到的事件 turn 或前端自增并随 submit 传 */);
-      const reply = await withTimeout(rpc.submitPrompt(text), 30000);
-      if (reply === TIMEOUT) { await speak("没听清,再说一次?"); continue; }
-      await speak(reply);                 // 念 agent 回复(message.complete 文本)
-      await sleep(50);                    // 排空窗:收尾随动作事件
+      d.buffer.clear();                     // 录音起始:丢弃上一轮 straggler 动作
+      const text = await d.listen();        // 复用现有录音/VAD/回声/静音逻辑
+      if (text == null) continue;           // 无人声/回声:继续听(结束由 agent 决定)
+      const reply = await withTimeout(d.submitPrompt(text), d.timeoutMs);
+      if (reply === TIMEOUT) { await d.speak("没听清,再说一次?"); continue; }
+      await d.speak(reply);                 // 念 agent 回复(message.complete 文本)
+      await d.sleep(50);                     // 排空窗:收尾随动作事件
       let ended = false;
-      for (const act of buffer.drain()) {
-        if (act.type === "stop_music") audio.stopMusic();
-        else if (act.type === "play_music") await audio.playMusic(act.query);
+      for (const act of d.buffer.drain()) {
+        if (act.type === "stop_music") d.stopMusic();
+        else if (act.type === "play_music") await d.playMusic(act.query);
         else if (act.type === "end_session") ended = true;
       }
       if (ended) break;
     }
-  } finally { setHudVisible(false); reportState("idle"); }  // busy 在此清
+  } finally { d.setHudVisible(false); d.reportState("idle"); }  // busy 在此清(整会话结束)
 }
 ```
-（`turn` 协调:简单做法=前端不发 turn,直接信任本会话内事件;turn 过期丢弃主要防跨会话串扰。实现时若 submitPrompt 不暴露 turn,用"收到 message.complete 即 drain + 50ms"即可,TurnBuffer 的 turn 作防御性保留。)
+`main.ts` 只负责装配 deps(真 AudioEngine/rpc/事件订阅:`play_music`/`stop_music`/`end_session` → `buffer.push`),调 `runSession`。
+
+- [ ] **Step 2b: 会话循环 fake-timer 测试(补主行为覆盖)**
+
+`session.test.ts` 加(vitest `vi.useFakeTimers()` + 桩 deps):
+```typescript
+it("play 在念完确认后才执行,end_session 退出循环", async () => {
+  const calls: string[] = [];
+  const buffer = new ActionBuffer();
+  let turn = 0;
+  const d = stubDeps({
+    listen: async () => (turn++ === 0 ? "放首晴天" : null),
+    submitPrompt: async () => { buffer.push({type:"play_music",query:"晴天"}); buffer.push({type:"end_session"}); return "好,放晴天"; },
+    speak: async (t) => { calls.push("speak:"+t); },
+    playMusic: async (q) => { calls.push("play:"+q); },
+    buffer,
+  });
+  await runSession(d);
+  // 招呼→念回复→play→end:play 在 speak 之后,end_session 使其退出
+  expect(calls).toEqual(["speak:<greeting>", "speak:好,放晴天", "play:晴天"]);
+});
+it("submitPrompt 超时 → 念提示并继续听,不崩", async () => { /* listen 第一轮触发超时,断言 speak('没听清…') 且进入下一轮 */ });
+```
+（`stubDeps` 提供默认桩 + 覆盖;`withTimeout` 用注入的 sleep/timer 以便 fake-timers 推进。)
+Run: `cd hud-app/hud && npm test -- session` → PASS。
 
 - [ ] **Step 3: 类型检查 + build**
 
