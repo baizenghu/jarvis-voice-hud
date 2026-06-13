@@ -1,8 +1,8 @@
 # 路线图:贾维斯语音 HUD
 
-> 🚀 **NEW SESSION 入口**:先读最新交接 [HANDOFF-2026-06-12-2c悬浮小球三里程碑.md](HANDOFF-2026-06-12-2c悬浮小球三里程碑.md)
-> ——贾维斯已迁 Windows D 盘源码版,Phase 2a 全过;**2c M1+M2+M3 已真机验收(悬浮小球可文字+语音对话)**(分支
-> `feat/voice-hud-2c-m1`,未合 main);下一步 M4 打包 / Phase 3 唤醒词 / 2b(等 Pico)。
+> 🚀 **NEW SESSION 入口**:先读最新交接 [HANDOFF-2026-06-12-phase3免按住与全屏overlay.md](HANDOFF-2026-06-12-phase3免按住与全屏overlay.md)
+> ——**Phase 3 免按住已在家里 Linux 真机验收**(双语唤醒"贾维斯/Jarvis"+连续对话+"退下"隐身,全屏 overlay 形态);
+> 2c M1+M2+M3 此前已过(Windows 小球文字+语音);下一步 M4 自启/打包 / 免按住移植 Windows / 2b(等 Pico)。
 > 红线:杀残留进程用 `fuser -k <port>/tcp` 别 `pkill -f`;Windows 远程一律绝对路径+robocopy;在 main 上提交先确认。
 
 持久的分期状态。每个阶段实现的架构见 [design.md](design.md)。
@@ -61,12 +61,16 @@ clawtouch(Pico HID + 本地 stdio MCP)。目标机已探明:Win11 24H2、原生 
   - **M4(剩余)**:`tauri build` 出 `.exe` + 自启动 + 贾维斯图标。
 - **验收门:** 在 Windows 上喊话 → 远程转写 → MiniMax → 远程合成念回;且能让贾维斯读写本机文件、操作界面。
 
-### Phase 3 —— 唤醒词(喊它名字)—— 已确认
-喊出助手名字唤醒是核心交互(decision 0003),非可选项。
-- 引擎与名字已定(open-questions 已解决):**openWakeWord** + **"贾维斯"**(训练自定义中文热词)。
-- 跑一个常驻监听器(倾向 Tauri Rust 侧),触发 IDLE→LISTENING。
-- 取代开发期的热键/点击成为主触发方式。
-- **验收门:** 待机时喊"贾维斯"即唤醒 HUD 并开始聆听,全程免手动。
+### Phase 3 —— 唤醒词(喊它名字)—— ✅ 完成(2026-06-12,家里 Linux 真机验收)
+喊出助手名字唤醒是核心交互(decision 0003)。**实现与原设想的差异**:引擎从 openWakeWord 改为
+**sherpa-onnx KWS 双模型**(中文 wenetspeech 拼音热词 + 英文 gigaspeech BPE 热词,均零训练,openWakeWord 已否决);
+监听器是独立 Python 进程(`hud-app/kws_listener.py`)挂网关旁,非 Tauri Rust 侧。
+- 链路:KWS 检出 →POST `/api/wake` → 网关 `/api/events` WS 推送 → HUD 现身+打招呼 → 连续对话(静音端点)→
+  "退下/再见/拜拜"隐身;busy 抑制+回声过滤+静音窗丢弃防自触发。
+- 全屏 overlay 形态(`JARVIS_OVERLAY=1`:铺满+鼠标穿透+深色半透底+待机隐身);Windows 小球形态不受影响。
+- **验收门已过:** 用户实喊"贾维斯"三连中,完整多轮对话,"退下"退场,全程免手动。
+- 详见 [HANDOFF-2026-06-12-phase3免按住与全屏overlay.md](HANDOFF-2026-06-12-phase3免按住与全屏overlay.md)。
+- **剩余移植项**:Windows 小球免按住(挂到 Phase 2 M4 之后)。
 
 ## 延后
 - 声音克隆 TTS(GPT-SoVITS / CosyVoice)—— 仅当用户想要克隆音色时再做。
