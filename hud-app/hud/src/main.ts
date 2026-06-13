@@ -1,11 +1,15 @@
-// Wire rpc + audio + machine + renderer. Dev activation: press-and-hold on the
-// canvas (mousedown → listen/record, mouseup → run the full turn).
+// Wire rpc + audio + machine + renderer. Thin client: after STT the text goes to
+// the agent (gateway-side brain), which calls voice_hud tools that broadcast
+// action events back over /api/events. This file only does I/O + executes those
+// actions — no semantic judgment (see design-agent-orchestration.md).
+// Dev activation: press-and-hold on the canvas (mousedown → record, mouseup → turn).
 
 import "./styles.css";
 import { RingHud } from "./hud/ring-hud.ts";
 import { AudioEngine, base64ToBytes, blobToBase64 } from "./voice/audio.ts";
 import { VoiceMachine } from "./voice/machine.ts";
 import { VoiceRpc, wsUrl } from "./voice/rpc.ts";
+import { ActionBuffer, runSession } from "./voice/session.ts";
 
 const canvas = document.getElementById("hud") as HTMLCanvasElement;
 const logEl = document.getElementById("log") as HTMLElement;
@@ -45,8 +49,12 @@ let resumeMusic: () => void = () => {}; // duck/resume around STT windows
 const normalize = (s: string): string => s.replace(/[^\p{L}\p{N}]/gu, "");
 
 // Phase 3: report busy/idle to the gateway so wake-word hits are suppressed
-// while a turn runs (TTS playback would otherwise re-trigger the KWS).
+// while a session runs (TTS playback would otherwise re-trigger the KWS).
 let eventsWs: WebSocket | null = null;
+
+// Action events from the agent's voice_hud tools, buffered per turn and drained
+// after the spoken reply (see runSession). One shared buffer for the session.
+const actionBuffer = new ActionBuffer();
 
 // Overlay 模式(Tauri 全屏穿透壳注入 __JARVIS_OVERLAY__):待机隐藏窗口,
 // 唤醒现身,退下隐身。浏览器/小球模式下是 no-op。
@@ -74,10 +82,21 @@ function connectEvents(): void {
   // same gateway as the RPC socket (handles the Tauri __JARVIS_WS_URL__ override)
   const ws = new WebSocket(wsUrl().replace(/\/api\/ws$/, "/api/events"));
   ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data as string) as { type?: string };
-    if (msg.type === "wake") {
+    const msg = JSON.parse(e.data as string) as { type?: string; query?: string };
+    switch (msg.type) {
+    case "wake":
       log("唤醒:贾维斯");
-      void wakeTurn();
+      void wakeSession();
+      break;
+    case "play_music":
+      actionBuffer.push({ type: "play_music", query: msg.query ?? "" });
+      break;
+    case "stop_music":
+      actionBuffer.push({ type: "stop_music" });
+      break;
+    case "end_session":
+      actionBuffer.push({ type: "end_session" });
+      break;
     }
   };
   ws.onclose = () => {
@@ -88,6 +107,8 @@ function connectEvents(): void {
     eventsWs = ws;
   };
 }
+
+// ── Manual press-and-hold path (dev): record while held, transcribe + answer on release.
 
 async function beginTurn(): Promise<void> {
   if (busy || !machine.can("START_LISTEN")) {
@@ -102,56 +123,25 @@ async function beginTurn(): Promise<void> {
   }
 }
 
-// Returns the user's transcript, or null if nothing usable was heard —
-// the wake-conversation loop uses this to decide whether to keep going.
-async function endTurn(): Promise<string | null> {
+async function endTurn(): Promise<void> {
   if (machine.state !== "listening") {
-    return null;
+    return;
   }
   busy = true;
   reportState("busy");
   machine.send("STOP_LISTEN"); // → transcribing
   try {
-    const { blob, mime } = await audio.stopRecording();
-    if (!blob.size) {
-      log("(录到 0 字节 — 按住太短或静音)");
-      machine.send("RESET");
-      return null;
-    }
-    const b64 = await blobToBase64(blob);
-    log("transcribing…");
-    const text = await rpc.transcribe(b64, mime);
+    const text = await finishRecordingToText();
     if (!text) {
-      log("(no speech detected)");
-      machine.send("RESET");
-      return null;
-    }
-    // 回声过滤:转写出的是贾维斯自己上一句话(的一部分)→ 丢弃,继续听
-    const t = normalize(text);
-    if (lastReply && t.length >= 3 && normalize(lastReply).includes(t)) {
-      log("(忽略自身回声)");
-      machine.send("RESET");
-      return "";
+      return;
     }
     youEl.textContent = `you: ${text}`;
     machine.send("TRANSCRIBED"); // → thinking
-
     log("thinking…");
     const reply = await rpc.submitPrompt(text);
-    replyEl.textContent = `Jarvis: ${reply}`;
-    lastReply = reply;
-    machine.send("REPLIED"); // → speaking
-
-    log("synthesizing…");
-    const syn = await rpc.synthesize(reply);
-    if (syn) {
-      await audio.play(base64ToBytes(syn.audio), syn.mime);
-      await audio.awaitPlaybackEnd();
-    }
-    return text;
+    await speak(reply);
   } catch (e) {
     log(`turn err: ${(e as Error).message}`);
-    return null;
   } finally {
     machine.send("DONE"); // → idle (no-op if already reset)
     machine.send("RESET");
@@ -162,22 +152,81 @@ async function endTurn(): Promise<string | null> {
   }
 }
 
-// Wake-word activation: conversation mode. After "贾维斯" wakes us, keep
-// taking hands-free turns until the user dismisses ("退下/再见/拜拜") or a
-// listening window passes with no usable speech.
+// Stop the current recording and transcribe it. Returns the transcript, or null
+// if nothing usable was heard (empty/silence/own-echo). Drives the machine
+// through transcribing; leaves it in transcribing on success (caller advances).
+async function finishRecordingToText(): Promise<string | null> {
+  const { blob, mime } = await audio.stopRecording();
+  if (!blob.size) {
+    log("(录到 0 字节 — 按住太短或静音)");
+    machine.send("RESET");
+    return null;
+  }
+  const b64 = await blobToBase64(blob);
+  log("transcribing…");
+  const text = await rpc.transcribe(b64, mime);
+  if (!text) {
+    log("(no speech detected)");
+    machine.send("RESET");
+    return null;
+  }
+  // 回声过滤:转写出的是贾维斯自己上一句话(的一部分)→ 丢弃,继续听
+  const t = normalize(text);
+  if (lastReply && t.length >= 3 && normalize(lastReply).includes(t)) {
+    log("(忽略自身回声)");
+    machine.send("RESET");
+    return null;
+  }
+  return text;
+}
+
+// Speak a line via TTS (synthesize + play through the analyser). Remembers it
+// for echo filtering and shows it in the UI. Shared by greeting/reply/timeout.
+async function speak(text: string): Promise<void> {
+  if (!text) {
+    return;
+  }
+  replyEl.textContent = `Jarvis: ${text}`;
+  lastReply = text;
+  machine.send("REPLIED"); // → speaking (no-op if not in thinking)
+  log("synthesizing…");
+  try {
+    const syn = await rpc.synthesize(text);
+    if (syn) {
+      await audio.play(base64ToBytes(syn.audio), syn.mime);
+      await audio.awaitPlaybackEnd();
+    }
+  } catch (e) {
+    log(`tts err: ${(e as Error).message}`);
+  }
+}
+
+// ── Wake-word session: agent-orchestrated conversation loop (runSession).
+
 const WAKE_SILENCE_MS = 1200; // end a turn after this much trailing silence
 const WAKE_WAIT_SPEECH_MS = 5000; // give the user this long to start talking
 const WAKE_MAX_MS = 15000; // hard cap per listening window
 const WAKE_LEVEL = 0.08;
-const GREETINGS =["我在,请讲。", "在的,有什么吩咐?", "先生,随时待命。", "你好 BOSS,我是贾维斯,有什么可以为你效劳?"];
+const SESSION_TIMEOUT_MS = 30000; // agent reply timeout → 念提示再听
+const GREETINGS = ["我在,请讲。", "在的,有什么吩咐?", "先生,随时待命。", "你好 BOSS,我是贾维斯,有什么可以为你效劳?"];
 
 let conversing = false;
 
-// One hands-free listening window: record until trailing silence (after
-// speech), or bail early when the user never starts talking.
+// One hands-free listening window: record until trailing silence (after speech),
+// or bail when the user never starts talking. Returns the transcript or null
+// (no usable speech / own echo). Pure I/O — no LLM call (runSession owns that).
 async function autoListen(): Promise<string | null> {
-  await beginTurn();
-  if (machine.state !== "listening") {
+  // 播放尾音 + 混响沉降期,避免下一轮录到贾维斯自己的声音
+  await new Promise((r) => setTimeout(r, 800));
+  if (!machine.can("START_LISTEN")) {
+    return null;
+  }
+  try {
+    resumeMusic = audio.duckForSpeech(); // music must not bleed into STT
+    await audio.startRecording();
+    machine.send("START_LISTEN");
+  } catch (e) {
+    log(`mic err: ${(e as Error).message}`);
     return null;
   }
   const t0 = performance.now();
@@ -209,49 +258,45 @@ async function autoListen(): Promise<string | null> {
     resumeMusic = () => {};
     return null;
   }
-  return endTurn();
+  machine.send("STOP_LISTEN"); // → transcribing
+  try {
+    const text = await finishRecordingToText();
+    if (text) {
+      youEl.textContent = `you: ${text}`;
+      machine.send("TRANSCRIBED"); // → thinking
+    }
+    return text;
+  } finally {
+    resumeMusic(); // un-duck after STT window
+    resumeMusic = () => {};
+  }
 }
 
-async function wakeTurn(): Promise<void> {
-  if (conversing) {
+// Wake → drive the agent-orchestrated session. The agent decides everything
+// (answer / play / stop / end); this only assembles the I/O deps.
+async function wakeSession(): Promise<void> {
+  if (conversing || busy) {
     return;
   }
   conversing = true;
-  setHudVisible(true);
-  try {
-    // 唤醒应答:先打个招呼,让用户知道它在听了
-    const hello = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
-    try {
-      replyEl.textContent = `Jarvis: ${hello}`;
-      lastReply = hello;
-      const syn = await rpc.synthesize(hello);
-      if (syn) {
-        await audio.play(base64ToBytes(syn.audio), syn.mime);
-        await audio.awaitPlaybackEnd();
-      }
-    } catch (e) {
-      log(`greet err: ${(e as Error).message}`);
-    }
-    for (;;) {
-      // 播放尾音 + 混响沉降期,避免下一轮录到贾维斯自己的声音
-      await new Promise((r) => setTimeout(r, 800));
-      const text = await autoListen();
-      if (text === "") {
-        continue; // 回声被过滤,接着听真人说话
-      }
-      if (!text) {
-        log("(对话结束 — 未听到指令)");
-        break;
-      }
-    }
-  } finally {
-    conversing = false;
-    setHudVisible(false);
-  }
+  await runSession({
+    listen: autoListen,
+    submitPrompt: (text) => rpc.submitPrompt(text),
+    speak,
+    playMusic: (q) => audio.playMusic(q),
+    stopMusic: () => audio.stopMusic(),
+    setHudVisible,
+    reportState,
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    pickGreeting: () => GREETINGS[Math.floor(Math.random() * GREETINGS.length)],
+    buffer: actionBuffer,
+    timeoutMs: SESSION_TIMEOUT_MS,
+  }).catch((e) => log(`session err: ${(e as Error).message}`));
+  conversing = false;
 }
 
-// Text turn (M2): Enter in #ask → prompt.submit → show reply. Drives the same
-// machine through its existing transitions (listening/transcribing flash by).
+// ── Text turn (dev): Enter in #ask → prompt.submit → speak reply.
+
 const askEl = document.getElementById("ask") as HTMLInputElement;
 
 async function textTurn(text: string): Promise<void> {
@@ -267,8 +312,7 @@ async function textTurn(text: string): Promise<void> {
   try {
     log("thinking…");
     const reply = await rpc.submitPrompt(text);
-    replyEl.textContent = `Jarvis: ${reply}`;
-    machine.send("REPLIED"); // → speaking (no audio in M2)
+    await speak(reply);
   } catch (e) {
     log(`turn err: ${(e as Error).message}`);
   } finally {
