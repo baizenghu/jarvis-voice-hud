@@ -81,6 +81,12 @@ clawtouch(Pico HID + 本地 stdio MCP)。目标机已探明:Win11 24H2、原生 
   - 触发用**前端意图识别**(`parseMusicIntent`),非原计划的 LLM 工具下发(后端工具不能在 webview 出声 + SOUL prompt 不在 repo);详见 impl-plan M2。
 - 详见 [impl-plan-music-playback.md](impl-plan-music-playback.md)。未决:持续音乐会否淹没/误触 KWS(真机专测)。
 
+### 架构重构 —— 控制权倒转(agent 编排 + 薄客户端)(设计成稿,待实现计划)
+现架构前端当大脑(正则判语义),证伪于"放首"→whisper"放手"正则失配。改为:KWS 开门 → agent 编排
+(收文本→判断→调 `play_music`/`stop_music`/`end_session` 工具 + 出话)→ 前端退化薄客户端执行。
+音乐改由 **agent 工具**触发(取代前端意图识别),decisions/0006 的 webview 播放+中心中转不变。
+设计见 [design-agent-orchestration.md](design-agent-orchestration.md)。头号风险:MiniMax-M3 工具调用稳定性(真机测)。
+
 ## 延后
 - 声音克隆 TTS(GPT-SoVITS / CosyVoice)—— 仅当用户想要克隆音色时再做。
 - macOS/Linux 桌面打包。
