@@ -62,6 +62,16 @@ export class VoiceRpc {
       ws.onclose = (e) => {
         this.onLog(`WS closed (code ${e.code})`);
         this.onStatus("closed");
+        // 旧会话随网关连接失效:清掉缓存的 session_id,重连后 ensureSession 会新建。
+        // 否则网关重启后 HUD 仍用失效会话 submit,永远等不到 message.complete → 超时
+        //(前端念"没听清,再说一次")。
+        this.sessionId = null;
+        // 若有正在等待的回复,断开即解掉(那一轮作废返回空),别卡到 30s 超时
+        if (this.awaitingReply) {
+          this.awaitingReply = false;
+          this.replyText = "";
+          this.replyDone?.();
+        }
         // 网关重启后自动重连,语音通道不用手动重启 HUD
         setTimeout(() => void this.connect().catch(() => {}), 2000);
       };
