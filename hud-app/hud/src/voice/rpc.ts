@@ -62,6 +62,8 @@ export class VoiceRpc {
       ws.onclose = (e) => {
         this.onLog(`WS closed (code ${e.code})`);
         this.onStatus("closed");
+        // 网关重启后自动重连,语音通道不用手动重启 HUD
+        setTimeout(() => void this.connect().catch(() => {}), 2000);
       };
       ws.onerror = () => {
         this.onLog("WS ERROR — 若是 wss 证书问题,先单独打开页面接受证书");

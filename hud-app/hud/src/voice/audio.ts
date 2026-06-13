@@ -39,6 +39,36 @@ export interface CaptureResult {
   mime: string;
 }
 
+// 16-bit PCM mono WAV encoder — fallback recording path for engines whose
+// MediaRecorder has no usable audio codec (e.g. WebKitGTK on Linux).
+export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const str = (off: number, s: string): void => {
+    for (let i = 0; i < s.length; i++) {
+      v.setUint8(off + i, s.charCodeAt(i));
+    }
+  };
+  str(0, "RIFF");
+  v.setUint32(4, 36 + samples.length * 2, true);
+  str(8, "WAVE");
+  str(12, "fmt ");
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); // PCM
+  v.setUint16(22, 1, true); // mono
+  v.setUint32(24, sampleRate, true);
+  v.setUint32(28, sampleRate * 2, true);
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  str(36, "data");
+  v.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buf;
+}
+
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
@@ -49,6 +79,11 @@ export class AudioEngine {
   private chunks: Blob[] = [];
   private recMime = "audio/webm";
   private micSource: MediaStreamAudioSourceNode | null = null;
+
+  // PCM fallback recording state (no MediaRecorder codec available).
+  private pcmNode: ScriptProcessorNode | null = null;
+  private pcmChunks: Float32Array[] = [];
+  private pcmStream: MediaStream | null = null;
 
   // Playback.
   private player: HTMLAudioElement | null = null;
@@ -78,16 +113,32 @@ export class AudioEngine {
     }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const mime = pickMime();
-    if (!mime) {
-      stream.getTracks().forEach((t) => t.stop());
-      throw new Error("浏览器不支持 webm/ogg 录制");
-    }
-    this.recMime = mime;
-    this.chunks = [];
-
     const ctx = this.ensureCtx();
     this.micSource = ctx.createMediaStreamSource(stream);
     this.micSource.connect(this.analyser!); // analyser is a sink; not routed to output
+
+    if (!mime) {
+      // WebKitGTK has MediaRecorder but no webm/ogg encoder — capture raw PCM
+      // through Web Audio and encode WAV ourselves on stop.
+      this.recMime = "audio/wav";
+      this.pcmChunks = [];
+      this.pcmStream = stream;
+      this.pcmNode = ctx.createScriptProcessor(4096, 1, 1);
+      this.pcmNode.onaudioprocess = (e) => {
+        this.pcmChunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+      };
+      this.micSource.connect(this.pcmNode);
+      // ScriptProcessor only fires when connected toward the destination; route
+      // through a zero-gain node so the mic is NOT audible on the speakers.
+      const mute = ctx.createGain();
+      mute.gain.value = 0;
+      this.pcmNode.connect(mute);
+      mute.connect(ctx.destination);
+      this.onLog("recording… (pcm/wav fallback)");
+      return;
+    }
+    this.recMime = mime;
+    this.chunks = [];
 
     this.recorder = new MediaRecorder(stream, { mimeType: mime });
     this.recorder.ondataavailable = (e) => {
@@ -101,6 +152,27 @@ export class AudioEngine {
 
   // Stop capture and return the recorded blob (empty blob if nothing captured).
   async stopRecording(): Promise<CaptureResult> {
+    if (this.pcmNode) {
+      this.pcmNode.disconnect();
+      this.pcmNode = null;
+      this.pcmStream?.getTracks().forEach((t) => t.stop());
+      this.pcmStream = null;
+      if (this.micSource) {
+        this.micSource.disconnect();
+        this.micSource = null;
+      }
+      const total = this.pcmChunks.reduce((n, c) => n + c.length, 0);
+      const samples = new Float32Array(total);
+      let off = 0;
+      for (const c of this.pcmChunks) {
+        samples.set(c, off);
+        off += c.length;
+      }
+      this.pcmChunks = [];
+      const blob = new Blob([encodeWav(samples, this.ctx!.sampleRate)], { type: "audio/wav" });
+      this.onLog(`captured ${blob.size} bytes (wav)`);
+      return { blob: total ? blob : new Blob([], { type: "audio/wav" }), mime: "audio/wav" };
+    }
     const rec = this.recorder;
     if (!rec || rec.state === "inactive") {
       return { blob: new Blob([], { type: this.recMime }), mime: this.recMime };

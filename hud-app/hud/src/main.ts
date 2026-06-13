@@ -5,7 +5,7 @@ import "./styles.css";
 import { RingHud } from "./hud/ring-hud.ts";
 import { AudioEngine, base64ToBytes, blobToBase64 } from "./voice/audio.ts";
 import { VoiceMachine } from "./voice/machine.ts";
-import { VoiceRpc } from "./voice/rpc.ts";
+import { VoiceRpc, wsUrl } from "./voice/rpc.ts";
 
 const canvas = document.getElementById("hud") as HTMLCanvasElement;
 const logEl = document.getElementById("log") as HTMLElement;
@@ -36,6 +36,55 @@ machine.onChange((s) => {
 });
 
 let busy = false;
+let lastReply = ""; // 回声过滤:记住上一句 TTS 内容
+
+// 去掉标点空白只留字词,回声比对不受标点差异干扰
+const normalize = (s: string): string => s.replace(/[^\p{L}\p{N}]/gu, "");
+
+// Phase 3: report busy/idle to the gateway so wake-word hits are suppressed
+// while a turn runs (TTS playback would otherwise re-trigger the KWS).
+let eventsWs: WebSocket | null = null;
+
+// Overlay 模式(Tauri 全屏穿透壳注入 __JARVIS_OVERLAY__):待机隐藏窗口,
+// 唤醒现身,退下隐身。浏览器/小球模式下是 no-op。
+interface TauriGlobals {
+  __JARVIS_OVERLAY__?: boolean;
+  __TAURI__?: { window: { getCurrentWindow(): { show(): Promise<void>; hide(): Promise<void> } } };
+}
+
+function setHudVisible(visible: boolean): void {
+  const g = window as TauriGlobals;
+  if (!g.__JARVIS_OVERLAY__ || !g.__TAURI__) {
+    return;
+  }
+  const w = g.__TAURI__.window.getCurrentWindow();
+  void (visible ? w.show() : w.hide());
+}
+
+function reportState(state: "busy" | "idle"): void {
+  if (eventsWs?.readyState === WebSocket.OPEN) {
+    eventsWs.send(JSON.stringify({ type: state }));
+  }
+}
+
+function connectEvents(): void {
+  // same gateway as the RPC socket (handles the Tauri __JARVIS_WS_URL__ override)
+  const ws = new WebSocket(wsUrl().replace(/\/api\/ws$/, "/api/events"));
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data as string) as { type?: string };
+    if (msg.type === "wake") {
+      log("唤醒:贾维斯");
+      void wakeTurn();
+    }
+  };
+  ws.onclose = () => {
+    eventsWs = null;
+    setTimeout(connectEvents, 2000);
+  };
+  ws.onopen = () => {
+    eventsWs = ws;
+  };
+}
 
 async function beginTurn(): Promise<void> {
   if (busy || !machine.can("START_LISTEN")) {
@@ -49,18 +98,21 @@ async function beginTurn(): Promise<void> {
   }
 }
 
-async function endTurn(): Promise<void> {
+// Returns the user's transcript, or null if nothing usable was heard —
+// the wake-conversation loop uses this to decide whether to keep going.
+async function endTurn(): Promise<string | null> {
   if (machine.state !== "listening") {
-    return;
+    return null;
   }
   busy = true;
+  reportState("busy");
   machine.send("STOP_LISTEN"); // → transcribing
   try {
     const { blob, mime } = await audio.stopRecording();
     if (!blob.size) {
       log("(录到 0 字节 — 按住太短或静音)");
       machine.send("RESET");
-      return;
+      return null;
     }
     const b64 = await blobToBase64(blob);
     log("transcribing…");
@@ -68,14 +120,24 @@ async function endTurn(): Promise<void> {
     if (!text) {
       log("(no speech detected)");
       machine.send("RESET");
-      return;
+      return null;
+    }
+    // 回声过滤:转写出的是贾维斯自己上一句话(的一部分)→ 丢弃,继续听
+    const t = normalize(text);
+    if (lastReply && t.length >= 3 && normalize(lastReply).includes(t)) {
+      log("(忽略自身回声)");
+      machine.send("RESET");
+      return "";
     }
     youEl.textContent = `you: ${text}`;
     machine.send("TRANSCRIBED"); // → thinking
 
-    log("thinking…");
-    const reply = await rpc.submitPrompt(text);
+    const reply = DISMISS_RE.test(text) ? "好,我退下了。" : await (async () => {
+      log("thinking…");
+      return rpc.submitPrompt(text);
+    })();
     replyEl.textContent = `Jarvis: ${reply}`;
+    lastReply = reply;
     machine.send("REPLIED"); // → speaking
 
     log("synthesizing…");
@@ -84,12 +146,106 @@ async function endTurn(): Promise<void> {
       await audio.play(base64ToBytes(syn.audio), syn.mime);
       await audio.awaitPlaybackEnd();
     }
+    return text;
   } catch (e) {
     log(`turn err: ${(e as Error).message}`);
+    return null;
   } finally {
     machine.send("DONE"); // → idle (no-op if already reset)
     machine.send("RESET");
     busy = false;
+    reportState("idle");
+  }
+}
+
+// Wake-word activation: conversation mode. After "贾维斯" wakes us, keep
+// taking hands-free turns until the user dismisses ("退下/再见/拜拜") or a
+// listening window passes with no usable speech.
+const WAKE_SILENCE_MS = 1200; // end a turn after this much trailing silence
+const WAKE_WAIT_SPEECH_MS = 5000; // give the user this long to start talking
+const WAKE_MAX_MS = 15000; // hard cap per listening window
+const WAKE_LEVEL = 0.08;
+const DISMISS_RE = /退下|再见|拜拜/;
+const GREETINGS = ["我在,请讲。", "在的,有什么吩咐?", "先生,随时待命。"];
+
+let conversing = false;
+
+// One hands-free listening window: record until trailing silence (after
+// speech), or bail early when the user never starts talking.
+async function autoListen(): Promise<string | null> {
+  await beginTurn();
+  if (machine.state !== "listening") {
+    return null;
+  }
+  const t0 = performance.now();
+  let lastVoice = performance.now();
+  let spoke = false;
+  await new Promise<void>((resolve) => {
+    const timer = setInterval(() => {
+      const now = performance.now();
+      if (audio.getLevel() > WAKE_LEVEL) {
+        spoke = true;
+        lastVoice = now;
+      }
+      const done =
+        (!spoke && now - t0 > WAKE_WAIT_SPEECH_MS) ||
+        (spoke && now - lastVoice > WAKE_SILENCE_MS) ||
+        now - t0 > WAKE_MAX_MS;
+      if (done) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 100);
+  });
+  if (!spoke) {
+    // 整窗没出现人声——丢弃录音,别送 whisper(静音会诱发"中文字幕"类幻觉)
+    machine.send("STOP_LISTEN");
+    await audio.stopRecording();
+    machine.send("RESET");
+    return null;
+  }
+  return endTurn();
+}
+
+async function wakeTurn(): Promise<void> {
+  if (conversing) {
+    return;
+  }
+  conversing = true;
+  setHudVisible(true);
+  try {
+    // 唤醒应答:先打个招呼,让用户知道它在听了
+    const hello = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+    try {
+      replyEl.textContent = `Jarvis: ${hello}`;
+      lastReply = hello;
+      const syn = await rpc.synthesize(hello);
+      if (syn) {
+        await audio.play(base64ToBytes(syn.audio), syn.mime);
+        await audio.awaitPlaybackEnd();
+      }
+    } catch (e) {
+      log(`greet err: ${(e as Error).message}`);
+    }
+    for (;;) {
+      // 播放尾音 + 混响沉降期,避免下一轮录到贾维斯自己的声音
+      await new Promise((r) => setTimeout(r, 800));
+      const text = await autoListen();
+      if (text === "") {
+        continue; // 回声被过滤,接着听真人说话
+      }
+      if (!text) {
+        log("(对话结束 — 未听到指令)");
+        break;
+      }
+      if (DISMISS_RE.test(text)) {
+        log("(贾维斯退下,喊名字再唤醒)");
+        break;
+      }
+    }
+  } finally {
+    conversing = false;
+    setHudVisible(false);
   }
 }
 
@@ -102,6 +258,7 @@ async function textTurn(text: string): Promise<void> {
     return;
   }
   busy = true;
+  reportState("busy");
   machine.send("START_LISTEN");
   machine.send("STOP_LISTEN");
   youEl.textContent = `you: ${text}`;
@@ -117,6 +274,7 @@ async function textTurn(text: string): Promise<void> {
     machine.send("DONE");
     machine.send("RESET");
     busy = false;
+    reportState("idle");
   }
 }
 
@@ -144,3 +302,4 @@ canvas.addEventListener("touchstart", (e) => {
 window.addEventListener("touchend", () => void endTurn());
 
 rpc.connect().catch((e) => log(`connect failed: ${(e as Error).message}`));
+connectEvents();

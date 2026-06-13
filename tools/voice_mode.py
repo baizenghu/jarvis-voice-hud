@@ -859,6 +859,17 @@ WHISPER_HALLUCINATIONS = {
     "明镜需要您的支持，欢迎关注明镜",
     "明镜与点点栏目",
     "请不吝点赞 订阅 转发 打赏支持明镜与点点栏目",
+    "中文字幕",
+    "中文字幕提供",
+    "中文字幕製作",
+    "中文字幕制作",
+    "字幕製作",
+    "字幕制作",
+    "字幕由amara.org社区提供",
+    "词曲:李宗盛",
+    "詞曲:李宗盛",
+    "作词:李宗盛",
+    "作曲:李宗盛",
 }
 
 # Regex patterns for repetitive hallucinations (e.g. "Thank you. Thank you. Thank you.")
@@ -874,7 +885,7 @@ def is_whisper_hallucination(transcript: str) -> bool:
     if not cleaned:
         return True
     # Exact match against known phrases
-    if cleaned.rstrip('.!') in WHISPER_HALLUCINATIONS or cleaned in WHISPER_HALLUCINATIONS:
+    if cleaned.rstrip('.!。!') in WHISPER_HALLUCINATIONS or cleaned in WHISPER_HALLUCINATIONS:
         return True
     # Repetitive patterns (e.g. "Thank you. Thank you. Thank you. you")
     if _HALLUCINATION_REPEAT_RE.match(cleaned):

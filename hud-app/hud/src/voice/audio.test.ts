@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { base64ToBytes, pickMime } from "./audio.ts";
+import { base64ToBytes, encodeWav, pickMime } from "./audio.ts";
 
 describe("pickMime", () => {
   it("prefers webm when supported", () => {
@@ -12,6 +12,21 @@ describe("pickMime", () => {
 
   it("returns empty string when nothing is supported", () => {
     expect(pickMime(() => false)).toBe("");
+  });
+});
+
+describe("encodeWav", () => {
+  it("writes a valid 16-bit mono PCM header and clamped samples", () => {
+    const buf = encodeWav(new Float32Array([0, 0.5, -1.5]), 48000);
+    const v = new DataView(buf);
+    expect(buf.byteLength).toBe(44 + 6);
+    expect(String.fromCharCode(v.getUint8(0), v.getUint8(1), v.getUint8(2), v.getUint8(3))).toBe("RIFF");
+    expect(v.getUint16(22, true)).toBe(1); // mono
+    expect(v.getUint32(24, true)).toBe(48000);
+    expect(v.getUint32(40, true)).toBe(6); // data bytes
+    expect(v.getInt16(44, true)).toBe(0);
+    expect(v.getInt16(46, true)).toBe(Math.floor(0.5 * 0x7fff));
+    expect(v.getInt16(48, true)).toBe(-0x8000); // clamped
   });
 });
 
