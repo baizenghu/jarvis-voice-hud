@@ -419,12 +419,24 @@ window.addEventListener("touchend", () => void endTurn());
 rpc.connect().catch((e) => log(`connect failed: ${(e as Error).message}`));
 connectEvents();
 
-// Music watcher:音乐在放就保持光圈可见(会话结束后仍跟跳),停了且不在会话时收回。
-// setHudVisible(true) 每拍重申 setAlwaysOnTop,持续压住贾维斯开的播放器窗口。
+// 强制把 overlay 抬到最前:GTK 上窗口已是 keep-above 时再 setAlwaysOnTop(true) 是
+// no-op(不会重叠抬升),压不过后来获得焦点的浏览器/窗口;切一次 false→true 才会
+// 让 WM 重新置顶。
+function raiseHud(): void {
+  const g = window as TauriGlobals;
+  if (!g.__JARVIS_OVERLAY__ || !g.__TAURI__) {
+    return;
+  }
+  const w = g.__TAURI__.window.getCurrentWindow();
+  void w.show().then(() => w.setAlwaysOnTop(false)).then(() => w.setAlwaysOnTop(true));
+}
+
+// Music watcher:该可见时(放歌/对话中)持续强制置顶,压住贾维斯开的浏览器等窗口;
+// 否则(待机)收回隐藏。
 setInterval(() => {
-  if (musicPlaying()) {
-    setHudVisible(true);
-  } else if (!conversing && !busy) {
+  if (musicPlaying() || conversing || busy) {
+    raiseHud();
+  } else {
     setHudVisible(false);
   }
-}, 300);
+}, 800);
