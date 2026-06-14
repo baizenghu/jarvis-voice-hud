@@ -11,11 +11,12 @@ branch: feat/voice-hud-agent-orchestration
 **贾维斯 agent 解耦(决策 0007:agent=文本进 `{text,end}` 出黑盒)phase 0–4 全部实现+提交+真机验过;STT 换 whisper large-v3-turbo(快、抗噪,真机"哇塞");百度 STT 作可选 backend。** 全在分支 `feat/voice-hud-agent-orchestration`,**未 push**。下一步=用户约定的「STT 独立化(脱 hermes,像 cosyvoice)」后续整改。
 
 ## ② git + 持久状态
-- 分支 `feat/voice-hud-agent-orchestration`,HEAD `21e6531`。**无 git remote → 全未 push**。
-  - 叠在 `6f1c8ac` 之上:`716fc87` docs、**`01011ce` p5-step1 STT 引擎**、`c8bb917` docs、**`05160a8` p5-step2 voice_svc 服务**、docs、**`21e6531` p5-step3 HUD fetch 直连(flag 默认 false)**。
+- 分支 `feat/voice-hud-agent-orchestration`,HEAD `0af5125`。**无 git remote → 全未 push**。
+  - 叠在 `6f1c8ac` 之上:`716fc87` docs、**`01011ce` p5-step1 STT 引擎**、docs、**`05160a8` p5-step2 voice_svc 服务**、docs、**`21e6531` p5-step3 HUD fetch 直连**、docs、**`0af5125` p5 Tauri 壳注入开关(真机验过)**。
 - 关键 commit:`08f7e72`(决策0007+计划+规格)`3a1b4cc`(p0)`64f6c6b`(p1鉴权)`a3f4f97`(p2 sanitizer)`b5b1c96`+`21f4eff`(p3 expand+contract)`b3f77ec`(webview音乐退役)`766549c`(p4静默超时)`67e7444`(百度STT backend)`ac177e2`(百度噪声过滤)`d7e0f88`(回声过滤修)`6f1c8ac`(docs)。
 - **3 个 pre-existing 改动全程没碰**(非本人):`hud-app/kws_listener.py`、`hud-app/whisper_api.py`、`tools/transcription_tools.py`。
 - **部署态(不在 git,机器重启需重做)**:中心 `~/.hermes-stt/config.yaml` `model:`→ 本地 turbo 路径;turbo 模型在 `~/.cache/whisper-models/faster-whisper-large-v3-turbo`(魔搭下);`.venv` 装了 `modelscope`;0.3 `~/.jarvis-secrets`(百度密钥,600,`STT_BACKEND=baidu` 已注释=用 whisper);whisper_api 手动起的(见⑥)。
+- **🆕 phase5 部署态(重启需重做,token 不在 git)**:**中心 voice_svc 跑 8011**——`HOST=0.0.0.0 PORT=8011 JARVIS_GATEWAY_TOKEN=<tok> setsid nohup bash hud-app/start_voice_svc.sh >/tmp/voice_svc.log 2>&1 &`(token 见 `/tmp/voice_svc_token.txt`,杀按端口 `fuser -k -9 8011/tcp`)。0.3 `~/.jarvis-secrets` 末尾有 `JARVIS_USE_HTTP_VOICE=1`/`JARVIS_VOICE_URL=http://10.8.0.2:8011`/`JARVIS_TOKEN=<tok>`(同一 token)。**HUD 现在喊话走中心 voice_svc,不再经网关 WS STT。** whisper_api:8010 仍在跑(Windows hermes 用,且是回退兜底)。
 
 ## ③ 本 session 成果(带证据)
 - **agent 解耦 phase 0–4 完成**:契约边界 = 文本进 `{text,end}` 出;`end_session` 由"广播事件"改成 message.complete 的 `payload.end`(机制=复用 hermes `tools.approval` session-key contextvar);前端 `runSession` 只认 `reply.end` 退场 + 静默超时(`IDLE_TIMEOUT_MS=30s`)退场;入站鉴权门(非 loopback 强制 token);TTS sanitizer(复用 `hermes_cli/voice.py` 抽 `tools/tts_sanitize.py`)。**每阶段 Codex 审过 + 复核**;后端 67 passed、前端 vitest 21、tsc/build 0;**phase3/4 真机 0.3 验过**(退下即退/静默退/不误退)。
@@ -30,11 +31,12 @@ branch: feat/voice-hud-agent-orchestration
    - **✅ step1(`01011ce`)**:`hud-app/voice_svc_stt.py`(引擎,A/B/C/D 全搬,配置改 env STT_MODEL/STT_LANGUAGE/STT_INITIAL_PROMPT)+ `tests/test_voice_svc_stt.py`。验:pytest 6 passed;grep 无 hermes import;import 零拉入 hermes 模块;faster_whisper 懒加载。
    - **✅ step2(`05160a8`)**:`hud-app/voice_svc.py`(HTTP `/health`/`/transcribe`/`/synthesize` + 鉴权守裸路径 + CORS regex + TTS 转发 cosyvoice:8003 直回 WAV 不重复毒化补偿)+ `tests/test_voice_svc_http.py`(11 passed)+ `start_voice_svc.sh`(STT_MODEL 显式指 turbo 路径)。验:全量 86 passed;voice_svc grep 无 hermes + import 零拉入。**端口选 8011**(避开 whisper_api 8010)。
    - **✅ step3(`21e6531`)**:前端 `voice_http.ts`(+11 测)+ `rpc.ts` 双路桩。flag 默认 false=旧 WS 路径零变化。验:vitest 32 passed、tsc 干净、vite build 正常。phase3 已先落 rpc.ts(`b5b1c96`),双改冲突不存在。
-   - **🔜 step4(真机翻 flag,只能在 0.3,需先解前置 unknown)**:
-     - **🔴 前置 unknown(spec §9,不解不开工)**:(1)voice_svc 部署在哪台?**HUD 走 WS RPC 时 STT 实际在哪跑**——网关 8765 在 0.3,voice_bytes→faster-whisper 是在 0.3 本地还是?要查清 voice_svc + cosyvoice 该部署在中心(10.8.0.2,有 GPU)还是 0.3,HUD 直连目标地址=loopback/LAN/WG → 决定鉴权是否触发(loopback 放行,LAN 需 token)。(2)单 GPU 12G 显存:取双进程(voice_svc 转发 cosyvoice:8003)维持现状占用。
-     - **翻 flag 做法**:在 0.3 注入 `window.__JARVIS_USE_HTTP_VOICE__=true` + `__JARVIS_VOICE_URL__=http://<voice_svc 地址>:8011`(+ LAN 则 `__JARVIS_TOKEN__`);Tauri 经 initialization_script 注入(参 `__JARVIS_WS_URL__` 现有注入点)。起 voice_svc:中心 `bash hud-app/start_voice_svc.sh`(STT_MODEL 已指 turbo)。**rsync 全量 hud/src 到 0.3(含 *.test.ts)再 build**。
-     - **真机门 G1–G5(spec §9)**:G1 转写质量不回退、G2 WAV 直播 OK、G3 连续多轮 _infer_lock 不崩、G4 静音/回声回空、G5 LAN 鉴权+CORS。过 → flag 默认改 true;未过 → flag 翻回 false 零损失。
-   - **🔜 step5 contract**(真机稳定后独立 commit):删 WS 语音路径(`voice_bytes.py` 两函数、`gateway_voice_patch.py` 两注册、`server.py:8959/8989`、`rpc.ts` 旧分支 + flag 包装),顺带清 main.ts base64 往返。**本次未做**。
+   - **✅ step4 真机翻 flag 通过(`0af5125`,2026-06-14 喊话验)**:
+     - **前置 unknown 已解**:GPU 在中心(10.8.0.2),0.3 无 GPU;今天 HUD STT 实际路径=HUD(0.3)→WS→网关(0.3 loopback)→voice_bytes→`provider:openai 10.8.0.2:8010/v1`→中心 whisper_api → 即 STT 早就在中心跑。**所以 voice_svc 部署中心** 10.8.0.2:8011(用 GPU+loopback 转发 cosyvoice:8003),HUD 跨 WG 连 → 非 loopback → 需 token。
+     - **部署**:中心起 `HOST=0.0.0.0 PORT=8011 JARVIS_GATEWAY_TOKEN=<tok> bash hud-app/start_voice_svc.sh`;`main.rs` INIT_SCRIPT 改读 env 三全局;0.3 `~/.jarvis-secrets` 加 `JARVIS_USE_HTTP_VOICE=1`/`JARVIS_VOICE_URL=http://10.8.0.2:8011`/`JARVIS_TOKEN=<tok>`;rsync 全量 hud/src+main.rs;`start_jarvis.sh` 重启(tauri 重编拾取)。
+     - **证据**:G1 转写「你好,我是贾维斯。」名字归一化在、G2 WAV webview 直播 OK、G3 连续多轮无崩、G4 静音判没听清、G5 鉴权 401/200。判别器:旧路 whisper_api:8010 `[stt]` 计数全程停 40=确实走新路。GPU 双 whisper+cosyvoice 共存 9.3/12G 不 OOM。
+     - **⚠️ flag 代码默认仍 false**(`voice_http.ts`);0.3 靠 secrets 注入启用。**别把代码默认改 true**——未注入 `__JARVIS_VOICE_URL__` 的 HUD 会把 voiceSvcBase 派生成网关地址(错)。改默认留到 step5 删 WS 路径时。**回退**:注释 0.3 secrets 三行 + 重启 HUD。
+   - **🔜 step5 contract**(可选,真机稳定一阵后独立 commit):删 WS 语音路径(`voice_bytes.py` 两函数、`gateway_voice_patch.py` 两注册、`server.py:8959/8989`、`rpc.ts` 旧分支 + flag 包装),顺带清 main.ts base64 往返,再把 flag 默认改 true。**本次未做,旧路径完整保留可回退。**
 2. 给中心 whisper_api 写一键启动脚本(现在手动,见⑥)。
 3. push 分支 / 决定 3 个 pre-existing 文件去留 / `ws_tool_smoke.py`(失效 dev 脚本)删否。
 4. phase 6(抢话打断/流式/进度/agent 主动说话)——需先解 AEC double-talk。
@@ -59,6 +61,8 @@ cd hud-app/hud && node_modules/.bin/vitest run   # 期望 21 passed
 # C. 中心 STT 活着 + 是 turbo
 grep model ~/.hermes-stt/config.yaml             # 期望 = .../faster-whisper-large-v3-turbo;若是 large-v3=turbo 没生效
 curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8010/v1/audio/transcriptions -F file=@/tmp/warm.wav  # 期望 200;连不上=whisper_api 没起(见⑥重启命令)
+# C2. phase5:中心 voice_svc 8011 活(HUD 喊话现在走它;没起=HUD 转写全失败"没听清")
+curl -s http://127.0.0.1:8011/health   # 期望 {"ok":true,...tts_ready:true};连不上=重起(见②phase5 部署态)
 # D. 0.3 家里栈(HUD/麦/KWS 在那台,WG 10.8.0.3)
 ssh baizh@10.8.0.3 'curl -sf http://127.0.0.1:8765/ && echo GW_UP; pgrep -f kws_listener>/dev/null && echo KWS_UP'  # 都 UP 才能喊话
 ssh baizh@10.8.0.3 'curl -s -X POST http://127.0.0.1:8765/api/wake'  # clients:1=HUD 已连;clients:0=HUD 没连(多半前端 build 失败,见⑥同步坑)
