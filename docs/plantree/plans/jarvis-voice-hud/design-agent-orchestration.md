@@ -1,6 +1,12 @@
 # 设计:控制权倒转 —— agent 编排 + 薄客户端
 
-日期:2026-06-12。状态:设计成稿 + Codex 审查并经代码核实纳入,待写实现计划。
+> ⚠️ **部分被 [decisions/0007](decisions/0007-agent-decoupling-text-blackbox.md) 取代(2026-06-13)。**
+> 作废:本文"agent 是系统**内嵌大脑**(in-process AIAgent + monkeypatch 工具 + WakeHub 广播动作)"——
+> 它**结构上不可换 agent**,与"换成任意 agent 框架"诉求冲突。0007 把 agent 降级成 `文本→{text,end}` 黑盒。
+> **仍有效**:"语义全交 agent、前端正则(`DISMISS_RE`/`parseMusicIntent`)已废"的方向被保留并强化。
+> 实施以 0007 + [impl-plan-agent-decoupling.md](impl-plan-agent-decoupling.md) 为准。
+
+日期:2026-06-12。状态:**部分作废**(见上;原:设计成稿 + Codex 审查并经代码核实纳入)。
 > 核实修正:① agent 与 WakeHub 同进程**已证实**(server.py in-process AIAgent),主路径成立;② Codex"MiniMax 走 anthropic_messages、extra_body no-op"经核实**不适用本配置**(家里 `provider:custom`+minimaxi→`chat_completions`,extra_body 生效、OpenAI 工具格式);③ 暴露真正头道门 = minimaxi 端点是否支持 OpenAI `tools`。
 > 本文是 Phase 4 之上的**架构重构设计**,经 brainstorming 逐节确认。它**取代**前期"前端意图识别/标记"那套触发(见 [decisions/0006](decisions/0006-music-playback-in-webview.md) 仍管 webview 播放+中心中转,**只换触发层**)。
 

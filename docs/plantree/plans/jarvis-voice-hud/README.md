@@ -28,8 +28,11 @@
 | [roadmap.md](roadmap.md) | Phase 0→4 计划与状态 |
 | [open-questions.md](open-questions.md) | 仍待拍板的事项 |
 | [topics/music-vs-asr-isolation.md](topics/music-vs-asr-isolation.md) | 放歌不干扰 KWS/STT 的分层防御策略(Phase 4 硬约束) |
-| [design-agent-orchestration.md](design-agent-orchestration.md) | **架构重构**:控制权倒转 = agent 编排 + 薄客户端(取代前端语义触发) |
-| [impl-plan-agent-orchestration.md](impl-plan-agent-orchestration.md) | 上文设计的可执行实现计划(Phase 0 阻塞门 minimaxi tools → 后端工具 → skill → 薄客户端 → 真机) |
+| [decisions/0007-agent-decoupling-text-blackbox.md](decisions/0007-agent-decoupling-text-blackbox.md) | **当前架构真相(读这个)**:agent 与系统解耦,agent = 文本进 `{text,end}` 出黑盒;取代 in-process 大脑 |
+| [impl-plan-agent-decoupling.md](impl-plan-agent-decoupling.md) | 上决策的迁移 TODO(expand/contract 分阶段:对账→鉴权→say分离→`{text,end}`边界→双路待机→语音服务独立) |
+| [specs/](specs/) | 阶段 2–5 各一份详细实施规格(workflow 产出 + Codex 逐份审查;含 file:line/TDD/真机门;末尾"Codex 复核已接受"节) |
+| [design-agent-orchestration.md](design-agent-orchestration.md) | ⚠️ 部分被 0007 取代:in-process 大脑那套作废;"语义全交 agent、前端正则已废"仍有效 |
+| [impl-plan-agent-orchestration.md](impl-plan-agent-orchestration.md) | 上文设计的可执行实现计划(部分随 0007 作废) |
 | [decisions/0001-audio-capture-location.md](decisions/0001-audio-capture-location.md) | 为何音频在前端采集,而非 Python 主机 |
 | [decisions/0002-shell-and-visuals.md](decisions/0002-shell-and-visuals.md) | Tauri v2 外壳 + WebGL HUD |
 | [decisions/0003-activation-wake-word.md](decisions/0003-activation-wake-word.md) | 唤醒方式 = 喊它名字 |

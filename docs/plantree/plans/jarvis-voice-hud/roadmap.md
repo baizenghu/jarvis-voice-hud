@@ -5,6 +5,10 @@
 > 工具接线修复 b8410e7),未合 main、未上真机;下一步 **Phase 4 真机部署家里 + 语音验收**。
 > 此前:Phase 3 免按住已家里真机验收(上篇 HANDOFF);Windows 2c M1-M3 过。
 > 红线:语义全交 agent(前端正则已废);工具须 monkeypatch `_load_enabled_toolsets`;杀端口 `fuser -k`;tar 连 hud/src;在 main 上提交先确认。
+>
+> 🧭 **架构方向变更(2026-06-13)**:确立**与 agent 解耦** —— agent = 文本进 `{text,end}` 出黑盒,
+> 贾维斯只管 STT+TTS+HUD+loop,MCP/skill 全在 agent 内部。见 [decisions/0007](decisions/0007-agent-decoupling-text-blackbox.md)
+> (**取代** design-agent-orchestration 的 in-process 大脑)+ 迁移 TODO [impl-plan-agent-decoupling.md](impl-plan-agent-decoupling.md)。**设计已定稿,未开始实施。**
 
 持久的分期状态。每个阶段实现的架构见 [design.md](design.md)。
 
