@@ -7,10 +7,15 @@ use tauri::{
 };
 
 // 运行期注入:① 本机网关 WS 地址(tauri:// 协议下前端推不出端口);② 透明背景(透出桌面);
-// ③ 顶部窄条拖拽区(M3:中心区留给"按住小球说话"的 canvas 事件,不能整窗覆盖)。
+// ③ 顶部窄条拖拽区(M3:中心区留给"按住小球说话"的 canvas 事件,不能整窗覆盖);
+// ④ phase5:语音服务直连开关/地址/token(从 env 读,不写死、不入源码,见 voice_http.ts)。
+//    空值=回退旧 WS 路径(__JARVIS_VOICE_URL__ 空 → voiceSvcBase 走 wsUrl 派生;flag 默认 false)。
 const INIT_SCRIPT: &str = r#"
 window.__JARVIS_WS_URL__ = 'ws://127.0.0.1:8765/api/ws';
 window.__JARVIS_OVERLAY__ = __OVERLAY__;
+window.__JARVIS_USE_HTTP_VOICE__ = __USE_HTTP_VOICE__;
+window.__JARVIS_VOICE_URL__ = '__VOICE_URL__';
+window.__JARVIS_TOKEN__ = '__TOKEN__';
 window.addEventListener('DOMContentLoaded', () => {
   const s = document.createElement('style');
   s.textContent = 'html,#hud{background:transparent !important;} body{background:__BG__ !important;}';
@@ -26,6 +31,11 @@ fn main() {
     // JARVIS_OVERLAY=1 → 全屏鼠标穿透 overlay(纯语音交互,点击落到桌面);
     // 不设 → 原 320×320 悬浮小球(Windows 默认形态)。
     let overlay = std::env::var("JARVIS_OVERLAY").map(|v| v == "1").unwrap_or(false);
+
+    // phase5: voice-service direct-connect, injected at runtime (no secrets in source).
+    let use_http_voice = std::env::var("JARVIS_USE_HTTP_VOICE").map(|v| v == "1").unwrap_or(false);
+    let voice_url = std::env::var("JARVIS_VOICE_URL").unwrap_or_default();
+    let voice_token = std::env::var("JARVIS_TOKEN").unwrap_or_default();
 
     tauri::Builder::default()
         .setup(move |app| {
@@ -45,7 +55,10 @@ fn main() {
                 .initialization_script(
                     &INIT_SCRIPT
                         .replace("__OVERLAY__", if overlay { "true" } else { "false" })
-                        .replace("__BG__", if overlay { "rgba(4, 10, 18, 0.55)" } else { "transparent" }),
+                        .replace("__BG__", if overlay { "rgba(4, 10, 18, 0.55)" } else { "transparent" })
+                        .replace("__USE_HTTP_VOICE__", if use_http_voice { "true" } else { "false" })
+                        .replace("__VOICE_URL__", &voice_url)
+                        .replace("__TOKEN__", &voice_token),
                 )
                 .build()?;
 
