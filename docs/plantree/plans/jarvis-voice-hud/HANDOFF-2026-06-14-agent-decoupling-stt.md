@@ -85,6 +85,42 @@ ssh baizh@10.8.0.3 'curl -s -X POST http://127.0.0.1:8765/api/wake'  # clients:1
 
 ---
 
+## ⑦ 公司 Windows 笔记本同步(待办,Windows 当前关机)
+
+**拓扑**:0.2(本机/中心,GPU,git 源头)**一直在公司**,公司 LAN = `192.168.0.7/24`(外加 WG `10.8.0.2`)。公司 Windows 笔记本同一 LAN(开机后是 `192.168.0.x`),已有一份**不同步的旧代码**;phase2a 曾往一台 Windows 装过 hermes(`D:\hermes-agent-main`+`D:\hermes-home`),**可能就是这台**(明天确认)。0.3 留家里不带来。
+
+**真相源**:GitHub `git@github.com:baizenghu/jarvis-voice-hud.git`,分支 `feat/voice-hud-agent-orchestration`,已 push 到 `5f1f6bc`(完整最新,含全部修复 + 收编的运行期调优)。**Windows 同步走 git,别 rsync(防再生漂移)。**
+
+**先确认两件事**:① 公司网能否访问 GitHub(有的拦);② Windows 开机后开没开 OpenSSH Server。
+
+**命令清单(明天 Windows 开机后,在 0.2 上跑)**
+```bash
+# A. 在 LAN 上找到 Windows(开机后)
+nmap -sn 192.168.0.0/24 2>/dev/null || \
+  for i in $(seq 1 254); do ping -c1 -W1 192.168.0.$i >/dev/null 2>&1 & done; wait; ip neigh | grep 192.168.0
+nc -zv -w3 <win-ip> 22   # 通=Windows 开了 sshd(可被推/可登);拒=没开 sshd
+
+# B-1. 首选:Windows 能上 GitHub → 在 Windows 上拉(需 Windows 装 git + GitHub SSH key/PAT)
+#   新克隆:  git clone git@github.com:baizenghu/jarvis-voice-hud.git
+#   旧副本:  cd <repo> && git fetch origin && git checkout feat/voice-hud-agent-orchestration && git pull
+
+# B-2. 公司网拦 GitHub → 局域网直连,让 Windows 从 0.2 拉(0.2 sshd 现成,无需 Windows 开 sshd)
+#   在 Windows(或我 ssh 进 Windows)上:
+#     git remote add center ssh://baizh@192.168.0.7/home/baizh/hermes-agent   # 首次
+#     git fetch center && git checkout feat/voice-hud-agent-orchestration && git merge center/feat/voice-hud-agent-orchestration
+#   (从非裸仓 fetch/pull 可以;别反向 push 进 0.2 的 checkout 分支)
+
+# B-3. 我从 0.2 主动 ssh 推(你要的方式;需 Windows 开 OpenSSH Server + 0.2→Win 的 key)
+#   推到 checkout 分支会被拒 → 用 rsync 工作树(注意:rsync 会绕过 git,慎用):
+#     rsync -a --exclude node_modules --exclude target --exclude .venv --exclude dist \
+#       ~/hermes-agent/ <winuser>@<win-ip>:/d/hermes-agent-main/
+#   或在 Windows 建裸仓再 push(更干净,但要先在 Win 配)。
+```
+
+**带不过去、Windows 另配**:`~/.jarvis-secrets`(token/百度密钥,不入库);若要 Windows 连中心语音服务(voice_svc:8011 / cosyvoice:8003)按角色另配网络+token。
+
+---
+
 ## 重启开场白(粘到新会话第一条)
 ```
 项目 ~/hermes-agent(jarvis-voice-hud)。读 docs/plantree/plans/jarvis-voice-hud/HANDOFF-2026-06-14-agent-decoupling-stt.md + roadmap.md 顶部入口。
