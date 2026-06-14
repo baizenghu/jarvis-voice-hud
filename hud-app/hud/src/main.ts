@@ -188,7 +188,7 @@ async function endTurn(): Promise<void> {
     machine.send("TRANSCRIBED"); // → thinking
     log("thinking…");
     const reply = await rpc.submitPrompt(text);
-    await speak(reply);
+    await speak(reply.text);
   } catch (e) {
     log(`turn err: ${(e as Error).message}`);
   } finally {
@@ -262,6 +262,9 @@ const WAKE_LEVEL = 0.08;
 const SESSION_TIMEOUT_MS = 180000; // agent reply timeout → 念提示再听。设 3 分钟,给工具
 // 任务(看 skill + 跑 terminal,MiniMax 推理可达数十秒)充足时间,不被砍成"没听清"。
 const GREETINGS = ["我在,请讲。", "在的,有什么吩咐?", "先生,随时待命。", "你好 BOSS,我是贾维斯,有什么可以为你效劳?"];
+// expand-contract(phase 3,decisions/0007):结束从哪来。默认 false = 现状(buffer 的
+// end_session);真机验收时临时置 true(壳注入或控制台)切到新边界 reply.end,验过再永久切。
+const USE_REPLY_END = (window as { __JARVIS_REPLY_END__?: boolean }).__JARVIS_REPLY_END__ ?? false;
 
 let conversing = false;
 
@@ -359,6 +362,7 @@ async function wakeSession(): Promise<void> {
     pickGreeting: () => GREETINGS[Math.floor(Math.random() * GREETINGS.length)],
     buffer: actionBuffer,
     timeoutMs: SESSION_TIMEOUT_MS,
+    useReplyEnd: USE_REPLY_END,
   }).catch((e) => log(`session err: ${(e as Error).message}`));
   if (duckedMusic) {
     duckMusic(false); // 会话结束恢复音量(若已停止则无害)
@@ -383,7 +387,7 @@ async function textTurn(text: string): Promise<void> {
   try {
     log("thinking…");
     const reply = await rpc.submitPrompt(text);
-    await speak(reply);
+    await speak(reply.text);
   } catch (e) {
     log(`turn err: ${(e as Error).message}`);
   } finally {

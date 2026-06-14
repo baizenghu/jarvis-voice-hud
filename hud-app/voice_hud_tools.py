@@ -13,11 +13,17 @@ so every handler accepts ``(args, **kw)``.
 from typing import Callable
 
 _broadcast: Callable[[dict], None] = lambda e: None  # injected by dev_server
+_end_flag: Callable[[], None] = lambda: None  # injected by dev_server (mark turn ended)
 
 
 def set_broadcast(fn: Callable[[dict], None]) -> None:
     global _broadcast
     _broadcast = fn
+
+
+def set_end_flag(fn: Callable[[], None]) -> None:
+    global _end_flag
+    _end_flag = fn
 
 
 def play_music_handler(args: dict, **kw) -> str:
@@ -32,5 +38,9 @@ def stop_music_handler(args: dict, **kw) -> str:
 
 
 def end_session_handler(args: dict, **kw) -> str:
+    # Dual-emit during the phase-3 expand step (decisions/0007): the old
+    # out-of-band broadcast stays until real-machine verification, AND the new
+    # path marks a turn-scoped flag so message.complete carries payload.end.
     _broadcast({"type": "end_session"})
+    _end_flag()
     return "会话结束"

@@ -33,10 +33,17 @@ export class ActionBuffer {
   }
 }
 
+// 贾维斯↔agent 的边界对象(decisions/0007):agent 一轮应答 = 文本 + 是否结束。
+// end 由各 agent 的薄适配器翻译进来(hermes:end_session 工具置位)。
+export interface AgentReply {
+  text: string; // 要念给用户的口语(沿用 message.complete payload.text)
+  end: boolean; // agent 判懂"退下/再见" → true;念完 text 再回待机
+}
+
 // 可注入依赖,便于 fake-timer 测会话循环。main.ts 装配真 AudioEngine/rpc/事件订阅。
 export interface SessionDeps {
   listen: () => Promise<string | null>; // 一窗录音+VAD;无人声/回声 → null
-  submitPrompt: (text: string) => Promise<string>; // 交 agent,等 message.complete
+  submitPrompt: (text: string) => Promise<AgentReply>; // 交 agent,等 {text,end}
   speak: (text: string) => Promise<void>; // TTS 念(招呼/agent 回复/超时兜底)
   playMusic: (query: string) => Promise<void>;
   stopMusic: () => void;
@@ -46,6 +53,9 @@ export interface SessionDeps {
   pickGreeting: () => string;
   buffer: ActionBuffer;
   timeoutMs: number;
+  // expand-contract(phase 3 step B):on=结束只认 reply.end(新边界),off=只认
+  // buffer 的 end_session(现状)。互斥,防双触发;默认 off → 行为与今日一致。
+  useReplyEnd: boolean;
 }
 
 const TIMEOUT = Symbol("timeout");
@@ -81,19 +91,20 @@ export async function runSession(d: SessionDeps): Promise<void> {
         await withTimeout(d.speak("没听清,再说一次?"), d.timeoutMs, d.sleep);
         continue;
       }
-      await withTimeout(d.speak(reply), d.timeoutMs, d.sleep); // 念 agent 回复(超时也不卡)
+      await withTimeout(d.speak(reply.text), d.timeoutMs, d.sleep); // 念 agent 回复(超时也不卡)
       await d.sleep(50); // 排空窗:收尾随动作事件
-      let ended = false;
+      let endedByBuffer = false;
       for (const act of d.buffer.drain()) {
         if (act.type === "stop_music") {
           d.stopMusic();
         } else if (act.type === "play_music") {
           await d.playMusic(act.query);
         } else if (act.type === "end_session") {
-          ended = true;
+          endedByBuffer = true;
         }
       }
-      if (ended) {
+      // flag on:只认 reply.end(忽略 buffer 的 end_session);off:维持现状。互斥防双触发。
+      if (d.useReplyEnd ? reply.end : endedByBuffer) {
         break;
       }
     }

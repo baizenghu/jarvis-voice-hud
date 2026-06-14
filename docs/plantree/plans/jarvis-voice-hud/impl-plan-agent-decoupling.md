@@ -99,19 +99,29 @@
 - [ ] **真机验收门(你来)**:喊一轮诱导 agent 回带 `**`/反引号/URL 的话 → 耳朵确认不念符号、正常中文韵律没变。
 
 ## 阶段 3 —— 定义 `{text, end}` 边界 + 适配器(核心)
-把 agent 接口收敛成"文本进、`{text,end}` 出",`end` 提取归适配器。
-- [ ] 定义 agent 适配器接口:输入 = 转写文本(+ 可选会话上下文),输出 = `{text, end}`。
-- [ ] **hermes 适配器**:`end_session` 工具不再经 `WakeHub` 广播动作,而是置返回值 `end=true`;
-      `voice_hud_tools.py` 的 handler / `dev_server.py` 的 `register`+monkeypatch 装配相应收敛。
-      (注:monkeypatch `_load_enabled_toolsets` 本阶段**去不掉**——voice_hud 是运行期注册 toolset,
-      上游配置路径看不到它;除非改上游让 toolset 走插件发现,属更大改动,本计划不含。)
-- [ ] 前端契约面收敛(expand/contract):
-  - 后端**双发**——旧 `{type:end_session}` 事件 + 新"回合返回带 `end`";
-  - 前端 feature flag 切到读 `end`;
-  - 真机验证(尤其"先念完告别再隐身"、busy 抑制、静音超时不误触)后,删旧 `end_session` 广播分支。
-- [ ] **同一 commit 顺带删 `play_music`/`stop_music` 死路径**(阶段 0 已定"去、并入此处";完整删除清单见
-      阶段 0 该条目):两 handler + 单测 + 前端 union/RANK/drain 分支 + `ws_tool_smoke.py:18`。打成"音乐退出契约"。
-- [ ] 同步重写 `tests/test_voice_hud_contract.py` 为新边界的守卫(轮返回 `{text,end}`、end→待机)。
+把 agent 接口收敛成"文本进、`{text,end}` 出",`end` 提取归适配器。详细规格见 [specs/phase3-text-end-boundary.md](specs/phase3-text-end-boundary.md)。
+- [x] **步骤 A —— 后端展开(双发,纯加法)**(2026-06-14,TDD):hermes 适配器把 `end_session` 翻译成 turn flag。
+  - 机制:**复用 hermes 已有的 `tools.approval` session-key contextvar**(terminal_tool 同款,已在 tool 执行处生效)。
+    `voice_hud_tools` 加 `set_end_flag` 注入;`end_session_handler` **双发**——旧 `_broadcast({type:end_session})` +
+    新 `_end_flag()`(置 `dev_server._END_FLAGS[当前 session_key]`)。`dev_server` monkeypatch `server._emit`:
+    `message.complete` 时该 session_key 在集合里 → payload 加 `end=True` 并清除。session-key 键 → turn-scoped、并发不串台、
+    不依赖线程/sid。契约别名层,不碰 server.py 内部。
+  - 测试 `tests/test_voice_hud_end_flag.py`(6):置位→end、未置→无、发射后清、并发不串台、非 complete 透传、handler 双发。
+- [x] **步骤 B —— 前端展开(feature flag,默认 off=零行为变化)**(2026-06-14,TDD):
+  - `session.ts`:`AgentReply{text,end}`、`SessionDeps.submitPrompt→Promise<AgentReply>`、加 `useReplyEnd`;
+    `runSession` 念 `reply.text`,结束 `useReplyEnd ? reply.end : endedByBuffer`(互斥防双触发)。
+  - `rpc.ts`:`replyEnd` 字段,`handleMessage` 读 `payload.end`,`submitPrompt` 返回 `{text,end}`,
+    **`onclose` 同清 `replyEnd`**(Codex:防断线残留误退)。
+  - `main.ts`:`USE_REPLY_END = window.__JARVIS_REPLY_END__ ?? false`(默认 off);dev textTurn 改 `reply.text`。
+  - 测试 `session.test.ts`:flag-off 现状两例保留 + flag-on 三例(end=true 先念后退 / end=false 续 / 忽略 buffer end)。
+    **vitest 8 passed + `tsc --noEmit` 0 + 后端 55 passed,无回归。**
+- [ ] **步骤 C —— 真机验收(你来,开 `__JARVIS_REPLY_END__=true` 先验后删)**:见下方真机验收门;全过才进 D。
+- [ ] **步骤 D —— 收缩(仅 C 过后,单个"音乐退出契约" commit)**:删旧 `end_session` 广播 + `play_music`/`stop_music`
+      死路径(两 handler + 单测 + 前端 union/RANK/drain/buffer 分支 + `audio.playMusic/stopMusic` 调用 + `ws_tool_smoke.py`)+
+      前端永久切新路径(删 flag);契约/tools 测试收缩到只剩 end-flag 守卫。
+- 真机验收门:① 念"退下"先念完告别再隐身;② TTS 期 busy 抑制不破;③ 回声门控不回归;④ 同轮动作先做完再退场;
+  ⑤ 长任务不被超时误退;⑥ **`HERMES_VOICE_TTS=0`(Codex blocker:网关 auto-TTS 与 HUD TTS 双念,家里默认 off 须确认)**;
+  ⑦ flag 回退(`=false` 行为同今日)。
 
 ## 阶段 4 —— 双路回待机
 - [ ] 路①:agent `end=true` → 念完 `text` 再回待机。

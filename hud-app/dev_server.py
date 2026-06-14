@@ -193,12 +193,53 @@ def _safe_emit(event: dict) -> None:
     safe_schedule_threadsafe(hub.broadcast(event), _main_loop)
 
 
+# --- phase-3 end flag (decisions/0007 step A): hermes adapter ---------------
+# The agent ends a voice session by calling end_session, which marks a
+# turn-scoped flag keyed by the CURRENT session key (tools.approval's session-key
+# contextvar — the same one terminal_tool reads, so it is already populated
+# wherever the tool runs). The wrapped server._emit attaches payload.end=True to
+# that session's next message.complete and clears the mark. Session-keyed →
+# turn-scoped, concurrency-safe (no cross-session bleed), no thread/sid coupling.
+# Dual-emit with the old {type:end_session} broadcast until real-machine verify
+# (expand-contract step A; the contract/delete is a later commit).
+_END_FLAGS: set[str] = set()
+
+
+def _mark_end() -> None:
+    from tools.approval import get_current_session_key
+
+    _END_FLAGS.add(get_current_session_key())
+
+
+def _patch_emit_for_end_flag() -> None:
+    """Wrap server._emit so message.complete for an ended turn carries end=True.
+
+    Same monkeypatch style as _patch_enabled_toolsets — a contract alias layer, so
+    server.py internals (where the payload is built) stay untouched. Non-
+    message.complete events and unmarked turns pass through unchanged."""
+    import tui_gateway.server as _gw
+    from tools.approval import get_current_session_key
+
+    _orig_emit = _gw._emit
+
+    def _patched(event: str, sid: str, payload: dict | None = None):
+        if event == "message.complete" and payload is not None:
+            key = get_current_session_key()
+            if key in _END_FLAGS:
+                _END_FLAGS.discard(key)
+                payload = {**payload, "end": True}
+        return _orig_emit(event, sid, payload)
+
+    _gw._emit = _patched
+
+
 def _register_voice_hud_tools() -> None:
     # schema MUST be {"description":..., "parameters":{...}} — registry.get_definitions
     # merges {**schema, "name": name} into the OpenAI `function` object. A bare
     # JSON Schema would push type/properties to the function top level and drop
     # the required `parameters` wrapper.
     voice_hud_tools.set_broadcast(_safe_emit)
+    voice_hud_tools.set_end_flag(_mark_end)
     # play_music / stop_music (webview playback) RETIRED — music now plays in a
     # real browser via the play-music skill (clawtouch + 歌曲宝), not in-webview.
     # Only end_session remains for the agent-orchestrated session lifecycle.
@@ -286,6 +327,7 @@ def _start_mcp_discovery() -> None:
 
 _register_voice_hud_tools()
 _patch_enabled_toolsets()
+_patch_emit_for_end_flag()
 _start_mcp_discovery()
 
 

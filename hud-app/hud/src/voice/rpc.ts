@@ -1,6 +1,8 @@
 // Typed WS JSON-RPC client. Ported verbatim from voice-harness.html: same
 // methods, same event handling (resolve pending replies on message.complete).
 
+import type { AgentReply } from "./session.ts";
+
 export interface TranscribeResult {
   text: string;
 }
@@ -15,7 +17,7 @@ interface RpcResponse<T = unknown> {
   result?: T;
   error?: { message: string; code?: number };
   method?: string;
-  params?: { type: string; payload?: { text?: string } };
+  params?: { type: string; payload?: { text?: string; end?: boolean } };
 }
 
 export type RpcStatus = "connecting" | "open" | "closed" | "error";
@@ -41,6 +43,7 @@ export class VoiceRpc {
 
   // Reply tracking for the async agent turn (message.complete event).
   private replyText = "";
+  private replyEnd = false; // payload.end — agent 判会话结束(decisions/0007)
   private awaitingReply = false;
   private replyDone: (() => void) | null = null;
 
@@ -70,6 +73,7 @@ export class VoiceRpc {
         if (this.awaitingReply) {
           this.awaitingReply = false;
           this.replyText = "";
+          this.replyEnd = false; // 断线作废轮:勿让残留 end 触发误退会话
           this.replyDone?.();
         }
         // 网关重启后自动重连,语音通道不用手动重启 HUD
@@ -96,6 +100,7 @@ export class VoiceRpc {
       const { type, payload } = msg.params;
       if (type === "message.complete" && this.awaitingReply) {
         this.replyText = payload?.text ?? "";
+        this.replyEnd = payload?.end ?? false;
         this.awaitingReply = false;
         this.replyDone?.();
       }
@@ -130,14 +135,15 @@ export class VoiceRpc {
   }
 
   // Submit a prompt and await the agent's reply (resolved via message.complete).
-  async submitPrompt(text: string): Promise<string> {
+  async submitPrompt(text: string): Promise<AgentReply> {
     const sessionId = await this.ensureSession();
     this.replyText = "";
+    this.replyEnd = false;
     this.awaitingReply = true;
     const waitReply = new Promise<void>((res) => (this.replyDone = res));
     await this.rpc("prompt.submit", { session_id: sessionId, text });
     await waitReply;
-    return this.replyText;
+    return { text: this.replyText, end: this.replyEnd };
   }
 
   async synthesize(text: string): Promise<SynthesizeResult | null> {

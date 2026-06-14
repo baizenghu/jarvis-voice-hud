@@ -29,7 +29,7 @@ describe("ActionBuffer", () => {
 function stubDeps(over: Partial<SessionDeps>): SessionDeps {
   const base: SessionDeps = {
     listen: async () => null,
-    submitPrompt: async () => "ok",
+    submitPrompt: async () => ({ text: "ok", end: false }),
     speak: async () => {},
     playMusic: async () => {},
     stopMusic: () => {},
@@ -39,11 +39,12 @@ function stubDeps(over: Partial<SessionDeps>): SessionDeps {
     pickGreeting: () => "<greeting>",
     buffer: new ActionBuffer(),
     timeoutMs: 30000,
+    useReplyEnd: false,
   };
   return { ...base, ...over };
 }
 
-describe("runSession", () => {
+describe("runSession (flag off — end via buffer action, current behavior)", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -57,7 +58,7 @@ describe("runSession", () => {
       submitPrompt: async () => {
         buffer.push({ type: "play_music", query: "晴天" });
         buffer.push({ type: "end_session" });
-        return "好,放晴天";
+        return { text: "好,放晴天", end: false };
       },
       speak: async (t) => {
         calls.push("speak:" + t);
@@ -68,7 +69,6 @@ describe("runSession", () => {
       buffer,
     });
     await runSession(d);
-    // 招呼→念回复→play→end:play 在 speak 之后,end_session 使其退出
     expect(calls).toEqual(["speak:<greeting>", "speak:好,放晴天", "play:晴天"]);
   });
 
@@ -78,19 +78,17 @@ describe("runSession", () => {
     const buffer = new ActionBuffer();
     let turn = 0;
     const d = stubDeps({
-      // 第一轮触发超时(submitPrompt 永不 resolve),第二轮正常并结束会话
       listen: async () => (turn === 0 ? "在吗" : "退下"),
       submitPrompt: () => {
         if (turn++ === 0) {
-          return new Promise<string>(() => {}); // 永挂 → 超时
+          return new Promise(() => {}); // 永挂 → 超时
         }
         buffer.push({ type: "end_session" });
-        return Promise.resolve("好,我退下了");
+        return Promise.resolve({ text: "好,我退下了", end: false });
       },
       speak: async (t) => {
         calls.push("speak:" + t);
       },
-      // 用真实 setTimeout(被 fake-timer 接管)实现 withTimeout / sleep(50)
       sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)),
       buffer,
       timeoutMs: 30000,
@@ -98,7 +96,78 @@ describe("runSession", () => {
     const p = runSession(d);
     await vi.runAllTimersAsync();
     await p;
-    // 招呼 → 超时兜底 → 第二轮念回复(然后 end_session 退出)
     expect(calls).toEqual(["speak:<greeting>", "speak:没听清,再说一次?", "speak:好,我退下了"]);
+  });
+});
+
+describe("runSession (flag on — end via reply.end, new {text,end} boundary)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("reply.end=true → 先念完 text 再退出循环", async () => {
+    const calls: string[] = [];
+    let turn = 0;
+    const d = stubDeps({
+      useReplyEnd: true,
+      listen: async () => {
+        if (turn++ === 0) return "退下";
+        throw new Error("listen called again — should have exited");
+      },
+      submitPrompt: async () => ({ text: "好,我退下了", end: true }),
+      speak: async (t) => {
+        calls.push("speak:" + t);
+      },
+    });
+    await runSession(d);
+    expect(calls).toEqual(["speak:<greeting>", "speak:好,我退下了"]); // 先念后退
+  });
+
+  it("reply.end=false → 不退出,继续下一轮", async () => {
+    const calls: string[] = [];
+    let turn = 0;
+    const d = stubDeps({
+      useReplyEnd: true,
+      listen: async () => {
+        if (turn === 0) return "在吗";
+        if (turn === 1) return "退下";
+        throw new Error("listen called too many times");
+      },
+      submitPrompt: async () =>
+        turn++ === 0 ? { text: "在的", end: false } : { text: "好,退下了", end: true },
+      speak: async (t) => {
+        calls.push("speak:" + t);
+      },
+    });
+    await runSession(d);
+    expect(calls).toEqual(["speak:<greeting>", "speak:在的", "speak:好,退下了"]);
+  });
+
+  it("flag on 时忽略 buffer 的 end_session(互斥,只认 reply.end)", async () => {
+    const calls: string[] = [];
+    const buffer = new ActionBuffer();
+    let turn = 0;
+    const d = stubDeps({
+      useReplyEnd: true,
+      listen: async () => {
+        if (turn === 0) return "x";
+        if (turn === 1) return "退下";
+        throw new Error("listen called too many times");
+      },
+      submitPrompt: async () => {
+        if (turn++ === 0) {
+          buffer.push({ type: "end_session" }); // 旧路信号:flag on 必须忽略
+          return { text: "第一句", end: false };
+        }
+        return { text: "好,退下了", end: true };
+      },
+      speak: async (t) => {
+        calls.push("speak:" + t);
+      },
+      buffer,
+    });
+    await runSession(d);
+    // 若误认 buffer 的 end_session,会在第一轮就退出 → 只到 "第一句"
+    expect(calls).toEqual(["speak:<greeting>", "speak:第一句", "speak:好,退下了"]);
   });
 });
