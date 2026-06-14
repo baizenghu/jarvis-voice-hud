@@ -14,6 +14,7 @@ import base64
 import json
 import logging
 import os
+import re
 import subprocess
 import time
 import urllib.error
@@ -25,6 +26,21 @@ logger = logging.getLogger(__name__)
 _TOKEN_URL = "https://aip.baidubce.com/oauth/2.0/token"
 _ASR_URL = "https://vop.baidu.com/server_api"
 _token_cache: dict = {"token": "", "exp": 0.0}
+
+# Baidu (unlike whisper) renders post-reply echo / breath / room noise as a short
+# backchannel filler instead of empty. Drop pure fillers so they don't trigger a
+# spurious turn — but keep real 1-char commands like "停". This is the Baidu
+# analog of voice_mode.is_whisper_hallucination.
+_NOISE_FILLERS = {
+    "嗯", "恩", "唔", "呃", "额", "啊", "哦", "噢", "喔", "哎", "唉", "诶", "欸", "哼",
+    "嗯嗯", "哦哦", "啊啊", "嗯哼", "呃呃", "哈", "哈哈", "嗯呢",
+}
+
+
+def _is_noise(text: str) -> bool:
+    """True if the transcript is empty or just a backchannel filler (echo/noise)."""
+    t = re.sub(r"[^一-鿿A-Za-z0-9]", "", text)  # strip punctuation/space
+    return t == "" or t in _NOISE_FILLERS
 
 
 def _run_ffmpeg(audio: bytes) -> bytes:
@@ -110,4 +126,7 @@ def transcribe_baidu(audio: bytes, mime: str) -> str:
     if resp.get("err_no"):  # non-zero/non-None → failed or no speech
         return ""
     result = resp.get("result") or []
-    return result[0].strip() if result else ""
+    text = result[0].strip() if result else ""
+    if _is_noise(text):  # echo/breath/noise rendered as a filler → drop
+        return ""
+    return text

@@ -60,6 +60,20 @@ def test_token_cached_across_calls(monkeypatch):
     assert len(calls) == 1  # token fetched once, then cached
 
 
+def test_filler_noise_returns_empty(monkeypatch):
+    # Baidu renders post-reply echo/noise as a filler ("嗯。") — must drop it,
+    # else it triggers a spurious turn after every answer.
+    for filler in ["嗯。", "嗯", "啊", "哦哦", "呃。", "。", "  "]:
+        _mock_io(monkeypatch, asr_resp={"err_no": 0, "result": [filler]})
+        assert baidu_stt.transcribe_baidu(b"x", "audio/webm") == "", filler
+
+
+def test_keeps_real_short_command(monkeypatch):
+    # A genuine 1-char command must NOT be filtered as noise.
+    _mock_io(monkeypatch, asr_resp={"err_no": 0, "result": ["停"]})
+    assert baidu_stt.transcribe_baidu(b"x", "audio/webm") == "停"
+
+
 def test_transport_error_returns_empty(monkeypatch):
     # A network blip mid-conversation → graceful "" (not a hard error), like whisper.
     import urllib.error
