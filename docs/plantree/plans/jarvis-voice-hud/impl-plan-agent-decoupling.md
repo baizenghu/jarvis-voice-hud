@@ -160,10 +160,22 @@
   - 🔴 **用户前提**:`BAIDU_STT_API_KEY`/`BAIDU_STT_SECRET_KEY`(百度智能云 语音应用)+ `STT_BACKEND=baidu`,
     设在 0.3 网关 env(**别提交密钥**)。可能要关梯子(百度国内云)。真机验:中文识别准确率/延迟 vs whisper。
     `BAIDU_STT_DEV_PID` 默认 1537(普通话含标点)。
-- [ ] (原)`whisper_api` 重写成不依赖 `tools.voice_mode` 的独立 STT 服务——**STT 改百度后此项优先级降**(云 STT
-      已不经 whisper);仅当要保留本地 whisper 作 backend 时才需。
-- [ ] 统一契约:`POST /transcribe`、`POST /synthesize`、`GET /health`;`backend` 选 `local|baidu`(STT 侧已用 env
-      选择器达成雏形;完整独立服务+TTS backend 仍待)。
+- [x] **STT 提速 = whisper large-v3-turbo(2026-06-14,部署改动,非仓库代码)**:用户反馈"识别慢",真因是用了最重的
+      `large-v3`。换 `large-v3-turbo`(快几倍、仍本地、仍 VAD/抗噪)。HF 直连下不动(国内 LFS 卡 0)→ **改从魔搭下**:
+      `pengzhendong/faster-whisper-large-v3-turbo`(装了 `modelscope`),存 `~/.cache/whisper-models/faster-whisper-large-v3-turbo`;
+      中心 `~/.hermes-stt/config.yaml` `model:` 指向该**本地路径**(faster-whisper 直接加载,不再碰 HF)。真机:快、抗噪好。
+  - 🔵 **已摸清的"真机未知"(原 phase5 阻塞点,现已清)**:STT 跑在**中心 10.8.0.2**,`whisper_api.py`(`HOST=0.0.0.0:8010`,
+    `HERMES_HOME=/home/baizh/.hermes-stt`,从仓库根 `.venv` 启;**启动命令不在任何 committed 脚本**——重启需手动拉:
+    `HERMES_HOME=/home/baizh/.hermes-stt setsid nohup .venv/bin/python hud-app/whisper_api.py &`)。管线 = `whisper_api`(薄壳)
+    → `tools.voice_mode.transcribe_recording` → `tools.transcription_tools`(faster-whisper)+ voice_mode 过滤。0.3 STT 配置
+    `provider: openai, base_url: http://10.8.0.2:8010/v1`。
+- [ ] **🔜 后续整改(用户 2026-06-14 约定):STT 独立化(像 TTS)**。现 `whisper_api.py:24 from tools.voice_mode import
+      transcribe_recording` → 必须跑 hermes 树内,不是真独立服务(TTS `cosyvoice_server` 已零依赖独立)。要做:重写成
+      **零 hermes import** 的自包含 STT 服务(直接 faster-whisper turbo),**完整搬过质量门**(VAD、`is_whisper_hallucination`+
+      中文幻觉名单、语气词噪声过滤、`_JARVIS_ALIASES`——漏一个抗噪就回退)、自带配置、保持 `/v1/audio/transcriptions` 契约
+      (0.3 不用改)、把 `STT_BACKEND=baidu` 选择器收进服务、独立 venv/目录。**做法**:与现 whisper_api 并存 → 转写对等验证 →
+      切换(expand-contract,别一把梭,STT 现在好用别弄回退)。
+- [ ] 统一契约 + TTS backend(`local|baidu`)+ HUD 直连(rpc.ts fetch)——随上面独立化一并/其后做。
 - [ ] cosyvoice 侧基本现成(已零依赖独立 HTTP),仅对齐端点名 + backend 选择;保留 `_infer_lock`
       串行 + 短文本毒化补偿(`text+text`)两个生产事故约束。
 - [ ] HUD 直连语音服务(`rpc.ts` 的 transcribe/synthesize 从 WS RPC 改 fetch);处理 CORS/跨机鉴权。
