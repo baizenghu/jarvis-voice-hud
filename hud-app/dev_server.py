@@ -24,6 +24,7 @@ interface — only do this on a trusted network (e.g. the WireGuard interface).
 from __future__ import annotations
 
 import asyncio
+import hmac
 import os
 import subprocess
 import sys
@@ -54,8 +55,66 @@ DIST = HERE / "hud" / "dist"
 app = FastAPI(title="voice-harness dev server")
 
 
+# --- Phase 1 inbound auth gate (decisions/0007) ---------------------------
+# This server runs the agent in YOLO mode with the terminal toolset. A loopback
+# bind is trusted; any non-loopback interface (LAN/WireGuard) must present the
+# shared token JARVIS_GATEWAY_TOKEN via ?token=, or it is rejected (fail closed).
+# RESIDUAL: the decision keys off the HOST env as the *declared* bind. The app
+# cannot see a uvicorn `--host` CLI flag, so a launcher that binds a non-loopback
+# interface MUST also set HOST env to match (the shipped scripts do).
+_LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def _auth_required(host: str) -> bool:
+    return host not in _LOOPBACK
+
+
+def _token_ok(provided: str | None) -> bool:
+    """Constant-time compare against JARVIS_GATEWAY_TOKEN; False if unset/empty."""
+    expected = os.environ.get("JARVIS_GATEWAY_TOKEN") or ""
+    if not expected or not provided:
+        return False
+    try:
+        return hmac.compare_digest(provided, expected)
+    except TypeError:
+        return False  # non-ASCII str etc. — mismatch, not a 500
+
+
+def _auth_enabled() -> bool:
+    """Live (re-reads HOST each call) so it is not frozen at import and a startup
+    hook / any ASGI entrypoint honors the actual declared bind."""
+    return _auth_required(os.environ.get("HOST", "127.0.0.1"))
+
+
+def _authorized(token: str | None) -> bool:
+    return True if not _auth_enabled() else _token_ok(token)
+
+
+def _enforce_fail_closed(host: str) -> None:
+    """Refuse to start exposed on a non-loopback bind without a token."""
+    if _auth_required(host) and not (os.environ.get("JARVIS_GATEWAY_TOKEN") or ""):
+        print(f"[dev_server] FATAL: HOST={host} is non-loopback but "
+              f"JARVIS_GATEWAY_TOKEN is unset — refusing to start (fail closed). "
+              f"Set a token, or bind 127.0.0.1.", file=sys.stderr)
+        raise SystemExit(2)
+
+
+@app.middleware("http")
+async def _auth_mw(request: Request, call_next):
+    # WebSocket routes (/api/ws, /api/events) run in a different scope and are
+    # guarded inside their handlers; this only covers the HTTP /api/* surface.
+    if request.url.path.startswith("/api/") and not _authorized(
+        request.query_params.get("token")
+    ):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
 @app.websocket("/api/ws")
 async def ws(ws: WebSocket) -> None:
+    if not _authorized(ws.query_params.get("token")):
+        await ws.close(code=1008)  # policy violation
+        return
     await handle_ws(ws)
 
 
@@ -124,6 +183,9 @@ _main_loop: asyncio.AbstractEventLoop | None = None
 async def _capture_loop() -> None:
     global _main_loop
     _main_loop = asyncio.get_running_loop()
+    # Fail closed under ANY entrypoint (not just __main__): an external ASGI
+    # server (uvicorn dev_server:app) with HOST exposed but no token must not run.
+    _enforce_fail_closed(os.environ.get("HOST", "127.0.0.1"))
 
 
 def _safe_emit(event: dict) -> None:
@@ -229,6 +291,9 @@ _start_mcp_discovery()
 
 @app.websocket("/api/events")
 async def events(ws: WebSocket) -> None:
+    if not _authorized(ws.query_params.get("token")):
+        await ws.close(code=1008)  # policy violation
+        return
     await ws.accept()
     hub.clients.add(ws)
     try:
@@ -403,6 +468,7 @@ else:
 
 if __name__ == "__main__":
     host = os.environ.get("HOST", "127.0.0.1")
+    _enforce_fail_closed(host)
     port = int(os.environ.get("PORT", "8765"))
     cert = os.environ.get("SSL_CERTFILE")
     key = os.environ.get("SSL_KEYFILE")
