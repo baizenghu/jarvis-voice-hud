@@ -127,9 +127,14 @@
     死 deps。
   - 测试:`test_voice_hud_tools`/`contract`/`end_flag`/`session.test.ts` 收缩到只守新边界。
     **后端 57 passed + vitest 18 passed + tsc 0 + npm run build 0**,无回归。
-  - **故意留待单独清理(已 flag,非本契约)**:① `audio.ts` 的 `playMusic`/`stopMusic`(退役 webview `<audio>` 子系统)+
-    `dev_server` `/api/music` 代理 —— 现已无调用方,但属独立子系统,删它牵动 `MUSIC_UPSTREAM`/yt-dlp,留作单独 commit;
-    ② `hud-app/ws_tool_smoke.py`(tracked dev 脚本,成功判据依赖已删的 play_music 广播 → 失效;非我所建,提请你定删/留)。
+  - **[x] webview-music 退役(2026-06-14,独立 commit)**:落实"放歌=agent skill"。删 `audio.ts` 的 webview `<audio>`
+    子系统(`playMusic`/`stopMusic`/`ensureMusic`/`gatewayBase`/`isMusicPlaying`/`duckForSpeech` + music 字段)、`main.ts`
+    的 `resumeMusic` 机制(已全是 no-op)、`dev_server` 的 `/api/music` 代理 + `_proxy_stream`/`_resolve_stream_url`/
+    `MUSIC_*` + 随之孤立的 `asyncio`/`httpx`/`quote`/`StreamingResponse` import、`start_jarvis.sh` 的 `MUSIC_UPSTREAM=`。
+    决策 0006 加 superseded 横幅。**保留**:gequbao、`/api/music_state`/`music_duck`/`audio_level`、analyser/getBands/duck。
+    57+18 passed + tsc/build 0。已核实与真实音乐链路解耦(`MUSIC_UPSTREAM` 只服务 `/api/music`)。
+  - **仍留(非我所建)**:`hud-app/ws_tool_smoke.py`(tracked dev 脚本,成功判据依赖已删的 play_music 广播 → 失效;
+    提请你定删/留)。
 - 真机验收门:① 念"退下"先念完告别再隐身;② TTS 期 busy 抑制不破;③ 回声门控不回归;④ 同轮动作先做完再退场;
   ⑤ 长任务不被超时误退;⑥ **`HERMES_VOICE_TTS=0`(Codex blocker:网关 auto-TTS 与 HUD TTS 双念,家里默认 off 须确认)**;
   ⑦ flag 回退(`=false` 行为同今日)。

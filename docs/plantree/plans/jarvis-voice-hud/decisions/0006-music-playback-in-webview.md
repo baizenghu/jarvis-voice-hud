@@ -1,6 +1,12 @@
 # 决策 0006 —— 在线音乐在 HUD webview 内播放(网关同源代理),否决 mpv/原生进程
 
-日期:2026-06-12。状态:已采纳(待实施)。
+> ⚠️ **已被取代(2026-06-14)**:webview 内播(`<audio src=/api/music>` + yt-dlp 同源代理 + analyser 跟跳)
+> 太脆(WebKitGTK 编码/CSP/Cloudflare),实际改为 **gequbao 方案**——agent 的 `play-music` skill 起独立真 Chrome
+> (`gequbao_play.py` CDP)放歌,光圈改读**系统声卡 FFT**(`audio_levels.py`)。决策 0007 进一步明确:**放歌是
+> agent 的 skill,不是 HUD/网关的事**。webview 放歌子系统(`audio.ts` playMusic/stopMusic、`/api/music` 代理、
+> `MUSIC_UPSTREAM`)已删除。本决策仅留作历史。**仍有效的部分**:音乐期 STT 隔离(duck)、`music_state` 驱动粉色态。
+
+日期:2026-06-12。状态:**已被取代**(见上;原:已采纳)。
 
 ## 背景
 新需求两条:① 语音"帮我放首歌"让贾维斯放在线流(YouTube/Spotify 等),两台都要(家里 Linux 10.8.0.3 + 公司 Windows);

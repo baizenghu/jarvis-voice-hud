@@ -57,7 +57,6 @@ machine.onChange((s) => {
 
 let busy = false;
 let lastReply = ""; // 回声过滤:记住上一句 TTS 内容
-let resumeMusic: () => void = () => {}; // duck/resume around STT windows
 
 // 去掉标点空白只留字词,回声比对不受标点差异干扰
 const normalize = (s: string): string => s.replace(/[^\p{L}\p{N}]/gu, "");
@@ -151,7 +150,6 @@ async function beginTurn(): Promise<void> {
     return;
   }
   try {
-    resumeMusic = audio.duckForSpeech(); // music must not bleed into STT
     await audio.startRecording();
     machine.send("START_LISTEN");
   } catch (e) {
@@ -181,8 +179,6 @@ async function endTurn(): Promise<void> {
   } finally {
     machine.send("DONE"); // → idle (no-op if already reset)
     machine.send("RESET");
-    resumeMusic(); // un-duck if music was paused for this window
-    resumeMusic = () => {};
     busy = false;
     reportState("idle");
   }
@@ -262,7 +258,6 @@ async function autoListen(): Promise<string | null> {
     return null;
   }
   try {
-    resumeMusic = audio.duckForSpeech(); // music must not bleed into STT
     await audio.startRecording();
     machine.send("START_LISTEN");
   } catch (e) {
@@ -294,8 +289,6 @@ async function autoListen(): Promise<string | null> {
     machine.send("STOP_LISTEN");
     await audio.stopRecording();
     machine.send("RESET");
-    resumeMusic(); // un-duck (music kept playing through this idle window)
-    resumeMusic = () => {};
     return null;
   }
   machine.send("STOP_LISTEN"); // → transcribing
@@ -307,8 +300,6 @@ async function autoListen(): Promise<string | null> {
     }
     return text;
   } finally {
-    resumeMusic(); // un-duck after STT window
-    resumeMusic = () => {};
   }
 }
 

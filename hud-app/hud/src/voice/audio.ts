@@ -108,14 +108,6 @@ export class AudioEngine {
   private player: HTMLAudioElement | null = null;
   private mediaSource: MediaElementAudioSourceNode | null = null;
 
-  // Music playback (Phase 4): online stream plays IN the webview via a
-  // same-origin <audio> (gateway /api/music proxy) so it flows through the
-  // shared analyser and the core dances. crossOrigin is intentionally unset:
-  // the /api/music URL is same-origin → never taints the analyser (a
-  // cross-origin stream would zero out the FFT and the core wouldn't move).
-  private music: HTMLAudioElement | null = null;
-  private musicSource: MediaElementAudioSourceNode | null = null;
-  private musicUrl: string | null = null; // current blob: object URL (revoke on replace/stop)
 
   onLog: (m: string) => void = () => {};
 
@@ -284,95 +276,6 @@ export class AudioEngine {
           : 20000;
       const timer = setTimeout(finish, cap);
     });
-  }
-
-  private ensureMusic(): HTMLAudioElement {
-    if (!this.music) {
-      const el = document.createElement("audio");
-      el.id = "music-player";
-      document.body.appendChild(el);
-      this.music = el;
-      const ctx = this.ensureCtx();
-      this.musicSource = ctx.createMediaElementSource(el);
-      // Same rule as TTS: analyser is a sink, NEVER → destination (the mic also
-      // feeds it). Music → analyser (visuals) AND → destination (sound).
-      this.musicSource.connect(this.analyser!);
-      this.musicSource.connect(ctx.destination);
-    }
-    return this.music;
-  }
-
-  // Gateway HTTP base for /api/music. Under tauri:// the page is NOT served by
-  // the gateway, so a relative URL won't reach it — derive the base from the
-  // injected WS URL (ws://host/api/ws → http://host). In a browser (no
-  // override) return "" so the relative same-origin gateway URL is used.
-  private gatewayBase(): string {
-    const ws = (window as { __JARVIS_WS_URL__?: string }).__JARVIS_WS_URL__;
-    return ws ? ws.replace(/^ws/, "http").replace(/\/api\/ws$/, "") : "";
-  }
-
-  // Play an online stream by search query. Fetch the bytes and play from a
-  // same-origin blob: URL — a cross-origin <audio src> would taint the analyser
-  // (no dance), and under tauri:// a relative URL wouldn't reach the gateway.
-  async playMusic(query: string): Promise<void> {
-    const el = this.ensureMusic();
-    const url = `${this.gatewayBase()}/api/music?q=${encodeURIComponent(query)}`;
-    let blobUrl: string;
-    try {
-      const resp = await fetch(url);
-      if (!resp.ok) {
-        this.onLog(`音乐获取失败 HTTP ${resp.status}`);
-        return;
-      }
-      blobUrl = URL.createObjectURL(await resp.blob());
-    } catch (e) {
-      this.onLog(`音乐获取失败 (${(e as Error).name}) — 查网关/CSP connect-src`);
-      return;
-    }
-    if (this.musicUrl) {
-      URL.revokeObjectURL(this.musicUrl);
-    }
-    this.musicUrl = blobUrl;
-    el.onerror = () =>
-      this.onLog(`音乐解码失败 (MediaError ${el.error?.code}) — WebKitGTK 可能不支持该编码`);
-    el.src = blobUrl;
-    try {
-      await el.play();
-      this.onLog(`♪ ${query}`);
-    } catch (e) {
-      this.onLog(`音乐播放被拦 (${(e as Error).name})`);
-    }
-  }
-
-  stopMusic(): void {
-    if (!this.music) {
-      return;
-    }
-    this.music.pause();
-    this.music.removeAttribute("src");
-    this.music.load();
-    if (this.musicUrl) {
-      URL.revokeObjectURL(this.musicUrl);
-      this.musicUrl = null;
-    }
-    this.onLog("音乐已停");
-  }
-
-  isMusicPlaying(): boolean {
-    return !!this.music && !this.music.paused && !this.music.ended;
-  }
-
-  // Pause music for a clean STT window (decisions/0006 Layer 1: music must not
-  // bleed into speech recognition). Returns a resume fn; no-op if not playing
-  // (and a no-op resume if the music was stopped meanwhile, since play() on a
-  // src-less element rejects and is swallowed).
-  duckForSpeech(): () => void {
-    const el = this.music;
-    if (!el || el.paused) {
-      return () => {};
-    }
-    el.pause();
-    return () => void el.play().catch(() => {});
   }
 
   // 0..1 RMS-ish level from the FFT magnitude — drives the reactive core.

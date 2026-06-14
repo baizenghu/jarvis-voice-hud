@@ -13,7 +13,6 @@ bash "$HOME/hermes-agent/hud-app/audio_setup.sh"
 echo "== 2) 网关 =="
 fuser -k 8765/tcp 2>/dev/null; sleep 2
 HERMES_YOLO_MODE=1 HERMES_HOME=/home/baizh/hermes-home HOST=127.0.0.1 PORT=8765 \
-  MUSIC_UPSTREAM=http://10.8.0.2:8766 \
   HERMES_TUI_TOOLSETS="skills,terminal,clawtouch,vision,voice_hud,web" \
   setsid nohup "$VENV" hud-app/dev_server.py > /tmp/gw_orch.log 2>&1 < /dev/null &
 for i in $(seq 1 25); do sleep 2; curl -sf -o /dev/null http://127.0.0.1:8765/ && { echo "  网关 UP"; break; }; done

@@ -23,7 +23,6 @@ interface — only do this on a trusted network (e.g. the WireGuard interface).
 """
 from __future__ import annotations
 
-import asyncio
 import hmac
 import os
 import subprocess
@@ -31,12 +30,9 @@ import sys
 import time
 from pathlib import Path
 
-from urllib.parse import quote
-
-import httpx
 import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from tui_gateway.ws import handle_ws
@@ -388,90 +384,6 @@ async def music_duck(request: Request) -> JSONResponse:
     subprocess.Popen([sys.executable, _GEQUBAO, "--volume", vol],
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return JSONResponse({"ok": True, "vol": vol})
-
-
-# --- Phase 4 music proxy (M1) ---------------------------------------------
-# "Play a song" plays IN the HUD webview via <audio src="/api/music?q=...">, so
-# the existing Web Audio analyser sees it and the voiceprint core dances (see
-# decisions/0006). The stream MUST be same-origin: a cross-origin <audio> fed
-# into createMediaElementSource is tainted and the analyser reads all-zeros.
-# So this endpoint resolves an online stream with yt-dlp and proxies the bytes.
-#
-# MUSIC_UPSTREAM (optional): when set, this gateway does NOT resolve locally —
-# it relays /api/music to another gateway's /api/music (e.g. the GPU center,
-# whose IP isn't bot-blocked by YouTube). Home reaches YouTube through the
-# center over WireGuard, with no cookies. The relayed stream stays same-origin
-# to the HUD page (the analyser requirement) because home re-proxies the bytes.
-MUSIC_FORMAT = "bestaudio[ext=m4a]/bestaudio"  # m4a/AAC: WebKitGTK decodes it (no webm/ogg)
-MUSIC_RESOLVE_TIMEOUT_S = 20.0
-MUSIC_UPSTREAM = os.environ.get("MUSIC_UPSTREAM", "").rstrip("/")
-
-
-async def _resolve_stream_url(query: str) -> str | None:
-    """Resolve a search query to a direct audio stream URL via ``yt-dlp -g``.
-
-    Runs yt-dlp under the current interpreter (``python -m yt_dlp``) so it works
-    without PATH setup and identically on Windows.
-    """
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-m", "yt_dlp", "-f", MUSIC_FORMAT, "-g", f"ytsearch1:{query}",
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
-    try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=MUSIC_RESOLVE_TIMEOUT_S)
-    except asyncio.TimeoutError:
-        proc.kill()
-        return None
-    if proc.returncode != 0:
-        return None
-    lines = [ln for ln in out.decode().splitlines() if ln.strip()]
-    return lines[0] if lines else None
-
-
-async def _proxy_stream(url: str, fwd_headers: dict) -> StreamingResponse:
-    """Stream-proxy an upstream audio URL back to the caller (same-origin to the
-    HUD page), forwarding Range and passing through the content headers."""
-    client = httpx.AsyncClient(timeout=httpx.Timeout(MUSIC_RESOLVE_TIMEOUT_S, read=None))
-    req = client.build_request("GET", url, headers=fwd_headers)
-    resp = await client.send(req, stream=True)
-
-    async def body():
-        try:
-            async for chunk in resp.aiter_bytes():
-                yield chunk
-        finally:
-            await resp.aclose()
-            await client.aclose()
-
-    passthrough = ("content-type", "content-length", "content-range", "accept-ranges")
-    headers = {k: resp.headers[k] for k in passthrough if k in resp.headers}
-    headers.setdefault("content-type", "audio/mp4")
-    # CORS so the Tauri HUD (tauri://localhost) can stream this cross-origin with
-    # crossOrigin="anonymous" WITHOUT tainting the Web Audio analyser (the core/
-    # background dance needs untainted FFT). Local WG-only gateway → * is fine.
-    headers["access-control-allow-origin"] = "*"
-    return StreamingResponse(body(), status_code=resp.status_code, headers=headers)
-
-
-@app.get("/api/music", response_model=None)
-async def music(request: Request, q: str = "") -> StreamingResponse | JSONResponse:
-    q = q.strip()
-    if not q:
-        return JSONResponse({"ok": False, "error": "missing q"}, status_code=400)
-
-    fwd_headers = {}
-    rng = request.headers.get("range")  # forward Range so <audio> can seek
-    if rng:
-        fwd_headers["Range"] = rng
-
-    # Relay mode: hand off to the upstream gateway (it resolves + proxies).
-    if MUSIC_UPSTREAM:
-        return await _proxy_stream(f"{MUSIC_UPSTREAM}/api/music?q={quote(q)}", fwd_headers)
-
-    url = await _resolve_stream_url(q)
-    if not url:
-        return JSONResponse({"ok": False, "error": "resolve failed"}, status_code=502)
-    return await _proxy_stream(url, fwd_headers)
 
 
 # The old Phase 0 harness stays available at /harness as a fallback.
