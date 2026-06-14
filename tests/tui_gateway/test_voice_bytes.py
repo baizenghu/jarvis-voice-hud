@@ -83,6 +83,24 @@ def test_synthesize_bytes_sanitized_to_empty_skips_engine(monkeypatch):
     assert called is False
 
 
+def test_transcribe_bytes_routes_to_baidu_when_backend_set(monkeypatch):
+    # STT_BACKEND=baidu → cloud ASR, bypassing the whisper pipeline (decisions/0007).
+    import tools.baidu_stt as bs
+    monkeypatch.setenv("STT_BACKEND", "baidu")
+    monkeypatch.setattr(bs, "transcribe_baidu", lambda audio, mime: "百度结果")
+    # whisper path must NOT be reached
+    monkeypatch.setattr(vb, "transcribe_recording",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("whisper called")))
+    assert vb.transcribe_bytes(b"webm-bytes", "audio/webm") == "百度结果"
+
+
+def test_transcribe_bytes_default_backend_uses_whisper(monkeypatch):
+    monkeypatch.delenv("STT_BACKEND", raising=False)
+    monkeypatch.setattr(vb, "transcribe_recording",
+                        lambda path, model=None: {"success": True, "transcript": "whisper结果"})
+    assert vb.transcribe_bytes(b"x", "audio/webm") == "whisper结果"
+
+
 def test_transcribe_bytes_returns_text_and_uses_mime_suffix(monkeypatch):
     seen = {}
 

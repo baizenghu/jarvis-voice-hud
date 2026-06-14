@@ -40,6 +40,12 @@ def transcribe_bytes(audio: bytes, mime: str) -> str:
     if not audio:
         return ""
 
+    # STT backend selector (decisions/0007): STT_BACKEND=baidu → Baidu cloud ASR
+    # (no GPU, bypasses the center whisper). Default = the whisper pipeline below.
+    if (os.environ.get("STT_BACKEND") or "").lower() == "baidu":
+        from tools.baidu_stt import transcribe_baidu
+        return transcribe_baidu(audio, mime)
+
     suffix = _MIME_TO_SUFFIX.get((mime or "").split(";")[0].strip(), ".webm")
 
     fd, path = tempfile.mkstemp(suffix=suffix, prefix="hermes_stt_")

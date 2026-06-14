@@ -152,10 +152,18 @@
       长任务(查 skill/跑 terminal)期间不被误退。
 
 ## 阶段 5 —— 语音服务独立(difficulty 3,云 backend 留口不实现)
-- [ ] `whisper_api` 重写成不依赖 `tools.voice_mode` 的独立 STT 服务,**完整搬过** large-v3 + VAD +
-      幻觉抑制 + 中文过滤 + 助手名归一化(`_JARVIS_ALIASES`),否则转写质量回退。
-- [ ] 统一契约:`POST /transcribe`、`POST /synthesize`、`GET /health`;`backend` 选 `local|baidu`,
-      **百度云 backend 留接口不实现**(当前全本地 GPU,云是未来口子非当下痛点)。
+- [x] **STT 百度云 backend(2026-06-14,TDD,提前做)**:用户要求"语音识别改百度"。**收敛实现**——不重写整个
+      独立服务,只在 `transcribe_bytes`(网关 STT 入口)加 `STT_BACKEND` 选择器:`=baidu` → `tools/baidu_stt.py`
+      (ffmpeg 转 16k 单声道 PCM → 百度短语音识别 REST → 文本),**绕开中心 whisper、不用 GPU**;默认仍走 whisper,
+      可一键回退(契合"backend local|baidu 可选")。两 voice_bytes 文件同步(parity)。测试 `test_baidu_stt.py`(6)+
+      voice_bytes 路由 2 例,mock ffmpeg/HTTP,**44 passed**。
+  - 🔴 **用户前提**:`BAIDU_STT_API_KEY`/`BAIDU_STT_SECRET_KEY`(百度智能云 语音应用)+ `STT_BACKEND=baidu`,
+    设在 0.3 网关 env(**别提交密钥**)。可能要关梯子(百度国内云)。真机验:中文识别准确率/延迟 vs whisper。
+    `BAIDU_STT_DEV_PID` 默认 1537(普通话含标点)。
+- [ ] (原)`whisper_api` 重写成不依赖 `tools.voice_mode` 的独立 STT 服务——**STT 改百度后此项优先级降**(云 STT
+      已不经 whisper);仅当要保留本地 whisper 作 backend 时才需。
+- [ ] 统一契约:`POST /transcribe`、`POST /synthesize`、`GET /health`;`backend` 选 `local|baidu`(STT 侧已用 env
+      选择器达成雏形;完整独立服务+TTS backend 仍待)。
 - [ ] cosyvoice 侧基本现成(已零依赖独立 HTTP),仅对齐端点名 + backend 选择;保留 `_infer_lock`
       串行 + 短文本毒化补偿(`text+text`)两个生产事故约束。
 - [ ] HUD 直连语音服务(`rpc.ts` 的 transcribe/synthesize 从 WS RPC 改 fetch);处理 CORS/跨机鉴权。
