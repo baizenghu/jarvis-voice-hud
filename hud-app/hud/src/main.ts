@@ -202,9 +202,12 @@ async function finishRecordingToText(): Promise<string | null> {
     machine.send("RESET");
     return null;
   }
-  // 回声过滤:转写出的是贾维斯自己上一句话(的一部分)→ 丢弃,继续听
+  // 回声过滤:只丢"几乎整句等于上一句回复"的(=麦克风录到贾维斯自己的 TTS),
+  // 不丢只是恰好是回复里一小片段的真命令——否则你复述它说过的话当命令会被误杀。
+  // 判据:转写 ≈ 上一句回复(归一化后是其子串且长度 ≥85%)。回声靠 AEC + VAD 兜底。
   const t = normalize(text);
-  if (lastReply && t.length >= 3 && normalize(lastReply).includes(t)) {
+  const lr = normalize(lastReply);
+  if (lr && t.length >= 3 && lr.includes(t) && t.length >= lr.length * 0.85) {
     log("(忽略自身回声)");
     machine.send("RESET");
     return null;
