@@ -5,6 +5,9 @@ set -u
 cd "$HOME/hermes-agent"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 export DISPLAY="${DISPLAY:-:0}"
+# 可选本地密钥(不入库):放 STT_BACKEND / BAIDU_STT_API_KEY / BAIDU_STT_SECRET_KEY 等,
+# 网关进程会继承。无此文件则用默认(whisper STT)。
+[ -f "$HOME/.jarvis-secrets" ] && . "$HOME/.jarvis-secrets"
 VENV="$HOME/hermes-agent/.venv/bin/python"
 
 echo "== 1) 音频运行态(增益/AEC/默认源汇)=="
