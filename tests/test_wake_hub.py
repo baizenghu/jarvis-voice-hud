@@ -31,8 +31,8 @@ def test_broadcast_emits_to_clients():
     hub.clients.add(FakeWS())
     import asyncio
 
-    n = asyncio.run(hub.broadcast({"type": "play_music", "query": "晴天"}))
-    assert sent[-1] == {"type": "play_music", "query": "晴天"}
+    n = asyncio.run(hub.broadcast({"type": "music_state", "on": True}))
+    assert sent[-1] == {"type": "music_state", "on": True}
     assert n == 1
 
 
@@ -53,7 +53,7 @@ def test_broadcast_drops_dead_clients():
     hub.clients.add(DeadWS())
     import asyncio
 
-    n = asyncio.run(hub.broadcast({"type": "stop_music"}))
+    n = asyncio.run(hub.broadcast({"type": "wake"}))
     assert n == 1
     assert hub.clients == {good}
 

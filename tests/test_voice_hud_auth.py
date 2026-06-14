@@ -106,12 +106,8 @@ def test_startup_hook_fails_closed_under_any_entrypoint(monkeypatch):
     import dev_server
     monkeypatch.setenv("HOST", "10.8.0.2")
     monkeypatch.delenv("JARVIS_GATEWAY_TOKEN", raising=False)
-    saved = dev_server._main_loop
-    try:
-        with pytest.raises(SystemExit):
-            asyncio.run(dev_server._capture_loop())
-    finally:
-        dev_server._main_loop = saved
+    with pytest.raises(SystemExit):
+        asyncio.run(dev_server._on_startup())
 
 
 # --- integration: HTTP /api/* surface -------------------------------------

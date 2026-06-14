@@ -115,10 +115,21 @@
   - `main.ts`:`USE_REPLY_END = window.__JARVIS_REPLY_END__ ?? false`(默认 off);dev textTurn 改 `reply.text`。
   - 测试 `session.test.ts`:flag-off 现状两例保留 + flag-on 三例(end=true 先念后退 / end=false 续 / 忽略 buffer end)。
     **vitest 8 passed + `tsc --noEmit` 0 + 后端 55 passed,无回归。**
-- [ ] **步骤 C —— 真机验收(你来,开 `__JARVIS_REPLY_END__=true` 先验后删)**:见下方真机验收门;全过才进 D。
-- [ ] **步骤 D —— 收缩(仅 C 过后,单个"音乐退出契约" commit)**:删旧 `end_session` 广播 + `play_music`/`stop_music`
-      死路径(两 handler + 单测 + 前端 union/RANK/drain/buffer 分支 + `audio.playMusic/stopMusic` 调用 + `ws_tool_smoke.py`)+
-      前端永久切新路径(删 flag);契约/tools 测试收缩到只剩 end-flag 守卫。
+- [x] **步骤 C —— 真机验收(2026-06-14,0.3 家里机)**:开 `__JARVIS_REPLY_END__=true`(经 ssh rsync 10 文件到 0.3 +
+      flag sed on + `start_jarvis.sh`,带 `XAUTHORITY` 启 GUI)。**3 条全过**:退下念完告别才隐身 / 告别期尾音不重唤醒 /
+      多轮不提前退场。`HERMES_VOICE_TTS` 空(默认 off,无双念)。
+- [x] **步骤 D —— 收缩(2026-06-14,本 commit)**:agent 边界永久收敛为 `{text,end}`,删死契约。
+  - 后端:`voice_hud_tools.py` 只剩 `end_session_handler`(置 flag,**删** play/stop handler + `_broadcast`/`set_broadcast` +
+    旧 `{type:end_session}` 广播);`dev_server.py` 删随之变死的 `_safe_emit`/`_main_loop`/`safe_schedule_threadsafe` import +
+    `set_broadcast` 注入(`_capture_loop`→`_on_startup` 只留 fail-closed)。
+  - 前端:`session.ts` 删 `Action`/`RANK`/`orderActions`/`ActionBuffer` + `SessionDeps.{playMusic,stopMusic,buffer,useReplyEnd}`,
+    `runSession` 结束**只认 `reply.end`**(先念完 text 再退);`main.ts` 删 `actionBuffer`/play-stop-end 事件 case/`USE_REPLY_END`/
+    死 deps。
+  - 测试:`test_voice_hud_tools`/`contract`/`end_flag`/`session.test.ts` 收缩到只守新边界。
+    **后端 57 passed + vitest 18 passed + tsc 0 + npm run build 0**,无回归。
+  - **故意留待单独清理(已 flag,非本契约)**:① `audio.ts` 的 `playMusic`/`stopMusic`(退役 webview `<audio>` 子系统)+
+    `dev_server` `/api/music` 代理 —— 现已无调用方,但属独立子系统,删它牵动 `MUSIC_UPSTREAM`/yt-dlp,留作单独 commit;
+    ② `hud-app/ws_tool_smoke.py`(tracked dev 脚本,成功判据依赖已删的 play_music 广播 → 失效;非我所建,提请你定删/留)。
 - 真机验收门:① 念"退下"先念完告别再隐身;② TTS 期 busy 抑制不破;③ 回声门控不回归;④ 同轮动作先做完再退场;
   ⑤ 长任务不被超时误退;⑥ **`HERMES_VOICE_TTS=0`(Codex blocker:网关 auto-TTS 与 HUD TTS 双念,家里默认 off 须确认)**;
   ⑦ flag 回退(`=false` 行为同今日)。

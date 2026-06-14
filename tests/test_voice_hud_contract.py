@@ -2,11 +2,10 @@
 migration stays honest. If any of these break, the registration shape, the
 toolset-enablement path, or the OpenAI function-schema layering changed.
 
-Reflects current reality (see decisions/0007): play_music / stop_music are
-RETIRED (music plays in a real browser via the play-music skill, not in-webview;
-dev_server.py only registers end_session). The live voice_hud tool is
-``end_session``. The play_music/stop_music handlers still exist in
-voice_hud_tools.py but are never registered, so the agent does not see them.
+Reflects current reality (see decisions/0007): the only live voice_hud tool is
+``end_session``. play_music / stop_music were removed entirely — music plays in a
+real browser via the agent's play-music skill (gequbao), not in-webview, so the
+HUD/gateway no longer exposes music tools at all.
 
 Proves:
 - importing dev_server registers the voice_hud tools,
@@ -49,18 +48,18 @@ def test_register_and_definition_shape():
 
 
 def test_dispatch_routes_to_handler():
-    """registry.dispatch must reach the handler with (args, **kw) and the
-    handler must broadcast through the injected callback."""
-    import dev_server
+    """registry.dispatch must reach the handler with (args, **kw); the handler
+    marks the turn-scoped end flag (the {text,end} boundary, decisions/0007)."""
+    import dev_server  # noqa: F401  (import installs registration + end-flag wiring)
     import voice_hud_tools
     from tools.registry import registry
 
-    events = []
-    voice_hud_tools.set_broadcast(lambda e: events.append(e))
+    marked = []
+    real = voice_hud_tools._end_flag
+    voice_hud_tools.set_end_flag(lambda: marked.append(True))
     try:
         out = registry.dispatch("end_session", {}, task_id="t1")
-        assert events == [{"type": "end_session"}]
+        assert marked == [True]
         assert "会话结束" in out
     finally:
-        # restore the real broadcast (dev_server injected _safe_emit at import)
-        voice_hud_tools.set_broadcast(dev_server._safe_emit)
+        voice_hud_tools.set_end_flag(real)

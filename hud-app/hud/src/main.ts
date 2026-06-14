@@ -9,7 +9,7 @@ import { RingHud } from "./hud/ring-hud.ts";
 import { AudioEngine, base64ToBytes, blobToBase64 } from "./voice/audio.ts";
 import { VoiceMachine } from "./voice/machine.ts";
 import { VoiceRpc, wsUrl } from "./voice/rpc.ts";
-import { ActionBuffer, runSession } from "./voice/session.ts";
+import { runSession } from "./voice/session.ts";
 
 const canvas = document.getElementById("hud") as HTMLCanvasElement;
 const logEl = document.getElementById("log") as HTMLElement;
@@ -66,9 +66,6 @@ const normalize = (s: string): string => s.replace(/[^\p{L}\p{N}]/gu, "");
 // while a session runs (TTS playback would otherwise re-trigger the KWS).
 let eventsWs: WebSocket | null = null;
 
-// Action events from the agent's voice_hud tools, buffered per turn and drained
-// after the spoken reply (see runSession). One shared buffer for the session.
-const actionBuffer = new ActionBuffer();
 
 // Overlay 模式(Tauri 全屏穿透壳注入 __JARVIS_OVERLAY__):待机隐藏窗口,
 // 唤醒现身,退下隐身。浏览器/小球模式下是 no-op。
@@ -113,7 +110,6 @@ function connectEvents(): void {
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data as string) as {
       type?: string;
-      query?: string;
       bass?: number;
       mid?: number;
       treble?: number;
@@ -136,15 +132,6 @@ function connectEvents(): void {
     case "wake":
       log("唤醒:贾维斯");
       void wakeSession();
-      break;
-    case "play_music":
-      actionBuffer.push({ type: "play_music", query: msg.query ?? "" });
-      break;
-    case "stop_music":
-      actionBuffer.push({ type: "stop_music" });
-      break;
-    case "end_session":
-      actionBuffer.push({ type: "end_session" });
       break;
     }
   };
@@ -262,9 +249,6 @@ const WAKE_LEVEL = 0.08;
 const SESSION_TIMEOUT_MS = 180000; // agent reply timeout → 念提示再听。设 3 分钟,给工具
 // 任务(看 skill + 跑 terminal,MiniMax 推理可达数十秒)充足时间,不被砍成"没听清"。
 const GREETINGS = ["我在,请讲。", "在的,有什么吩咐?", "先生,随时待命。", "你好 BOSS,我是贾维斯,有什么可以为你效劳?"];
-// expand-contract(phase 3,decisions/0007):结束从哪来。默认 false = 现状(buffer 的
-// end_session);真机验收时临时置 true(壳注入或控制台)切到新边界 reply.end,验过再永久切。
-const USE_REPLY_END = (window as { __JARVIS_REPLY_END__?: boolean }).__JARVIS_REPLY_END__ ?? false;
 
 let conversing = false;
 
@@ -354,15 +338,11 @@ async function wakeSession(): Promise<void> {
     listen: autoListen,
     submitPrompt: (text) => rpc.submitPrompt(text),
     speak,
-    playMusic: (q) => audio.playMusic(q),
-    stopMusic: () => audio.stopMusic(),
     setHudVisible,
     reportState,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     pickGreeting: () => GREETINGS[Math.floor(Math.random() * GREETINGS.length)],
-    buffer: actionBuffer,
     timeoutMs: SESSION_TIMEOUT_MS,
-    useReplyEnd: USE_REPLY_END,
   }).catch((e) => log(`session err: ${(e as Error).message}`));
   if (duckedMusic) {
     duckMusic(false); // 会话结束恢复音量(若已停止则无害)

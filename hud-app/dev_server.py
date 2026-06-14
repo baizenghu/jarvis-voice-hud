@@ -166,31 +166,20 @@ class WakeHub:
 hub = WakeHub()
 
 
-# --- voice_hud agent tools -------------------------------------------------
-# The in-process gateway agent (tui_gateway/server.py) drives the thin HUD by
-# calling voice_hud tools (play_music / stop_music / end_session). Their
-# handlers broadcast action events to /api/events via _safe_emit, which bounces
-# hub.broadcast() onto the uvicorn event loop from whatever thread the tool
-# dispatch runs on (handlers may run in a thread pool).
+# --- voice_hud agent tool: end_session -------------------------------------
+# The in-process gateway agent calls end_session to end the voice session; its
+# handler marks a turn-scoped flag (see _mark_end / _patch_emit_for_end_flag) so
+# the turn's message.complete carries payload.end. play_music / stop_music were
+# retired with the {text,end} migration (decisions/0007).
 import voice_hud_tools
-from agent.async_utils import safe_schedule_threadsafe
 from tools.registry import registry
-
-_main_loop: asyncio.AbstractEventLoop | None = None
 
 
 @app.on_event("startup")
-async def _capture_loop() -> None:
-    global _main_loop
-    _main_loop = asyncio.get_running_loop()
+async def _on_startup() -> None:
     # Fail closed under ANY entrypoint (not just __main__): an external ASGI
     # server (uvicorn dev_server:app) with HOST exposed but no token must not run.
     _enforce_fail_closed(os.environ.get("HOST", "127.0.0.1"))
-
-
-def _safe_emit(event: dict) -> None:
-    """Schedule hub.broadcast(event) on the uvicorn loop, thread-safe."""
-    safe_schedule_threadsafe(hub.broadcast(event), _main_loop)
 
 
 # --- phase-3 end flag (decisions/0007 step A): hermes adapter ---------------
@@ -200,8 +189,6 @@ def _safe_emit(event: dict) -> None:
 # wherever the tool runs). The wrapped server._emit attaches payload.end=True to
 # that session's next message.complete and clears the mark. Session-keyed →
 # turn-scoped, concurrency-safe (no cross-session bleed), no thread/sid coupling.
-# Dual-emit with the old {type:end_session} broadcast until real-machine verify
-# (expand-contract step A; the contract/delete is a later commit).
 _END_FLAGS: set[str] = set()
 
 
@@ -238,7 +225,6 @@ def _register_voice_hud_tools() -> None:
     # merges {**schema, "name": name} into the OpenAI `function` object. A bare
     # JSON Schema would push type/properties to the function top level and drop
     # the required `parameters` wrapper.
-    voice_hud_tools.set_broadcast(_safe_emit)
     voice_hud_tools.set_end_flag(_mark_end)
     # play_music / stop_music (webview playback) RETIRED — music now plays in a
     # real browser via the play-music skill (clawtouch + 歌曲宝), not in-webview.
