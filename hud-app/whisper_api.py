@@ -23,6 +23,15 @@ from fastapi import FastAPI, File, Form, UploadFile
 
 from tools.voice_mode import transcribe_recording
 
+import re
+
+# 助手名归一化:强制 zh 解码会把 "Jarvis"/「贾维斯」转成谐音错字,统一回正名,
+# 下游(LLM 指令、退下匹配)才稳定。
+_JARVIS_ALIASES = re.compile(r"(?i)jarvis|夏威士|加维斯|甲微事|贾伟斯|佳维斯|家维斯|加伟斯")
+
+def _normalize_names(text: str) -> str:
+    return _JARVIS_ALIASES.sub("贾维斯", text)
+
 app = FastAPI(title="whisper STT API (OpenAI-compatible)")
 
 
@@ -52,7 +61,10 @@ async def transcriptions(
         except OSError:
             pass
     # OpenAI transcription response shape.
-    return {"text": (result.get("transcript") or "").strip()}
+    raw = (result.get("transcript") or "").strip()
+    text = _normalize_names(raw)
+    print(f"[stt] raw={raw!r} -> {text!r}", flush=True)
+    return {"text": text}
 
 
 if __name__ == "__main__":

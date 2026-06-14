@@ -24,11 +24,9 @@ from pathlib import Path
 import sherpa_onnx
 
 MODEL_DIR = Path(os.environ.get("KWS_MODEL_DIR", os.path.expanduser("~/kws-model")))
-# 英文唤醒("Jarvis")用 gigaspeech 英文模型并行检测;目录不存在则只跑中文
-EN_MODEL_DIR = Path(os.environ.get("KWS_EN_MODEL_DIR", os.path.expanduser("~/kws-model-en")))
 WAKE_URL = os.environ.get("WAKE_URL", "http://127.0.0.1:8765/api/wake")
+# 只用中文模型唤醒「贾维斯」。英文 gigaspeech 模型对中文口音的 "Jarvis" 冷测 0 命中,已弃用。
 KEYWORD = os.environ.get("KWS_KEYWORD", "j iǎ w éi s ī @贾维斯")
-EN_KEYWORD = os.environ.get("KWS_EN_KEYWORD", "▁JA R VI S @Jarvis")
 SAMPLE_RATE = 16000
 
 
@@ -46,12 +44,7 @@ def _spotter(model_dir: Path, keyword: str) -> sherpa_onnx.KeywordSpotter:
 
 
 def make_spotters() -> list[sherpa_onnx.KeywordSpotter]:
-    spotters = [_spotter(MODEL_DIR, KEYWORD)]
-    if EN_MODEL_DIR.is_dir():
-        spotters.append(_spotter(EN_MODEL_DIR, EN_KEYWORD))
-    else:
-        print(f"[kws] {EN_MODEL_DIR} 不存在,只跑中文唤醒", flush=True)
-    return spotters
+    return [_spotter(MODEL_DIR, KEYWORD)]
 
 
 def notify_wake() -> None:
@@ -99,7 +92,7 @@ def run_mic(spotters: list[sherpa_onnx.KeywordSpotter]) -> None:
     import sounddevice as sd
 
     streams = [sp.create_stream() for sp in spotters]
-    print(f"[kws] listening for 「贾维斯」/「Jarvis」({len(spotters)} models) → {WAKE_URL}", flush=True)
+    print(f"[kws] listening for 「贾维斯」 → {WAKE_URL}", flush=True)
     with sd.InputStream(channels=1, dtype="float32", samplerate=SAMPLE_RATE) as mic:
         while True:
             samples, _ = mic.read(int(0.1 * SAMPLE_RATE))
@@ -108,7 +101,9 @@ def run_mic(spotters: list[sherpa_onnx.KeywordSpotter]) -> None:
                 stream.accept_waveform(SAMPLE_RATE, flat)
                 while spotter.is_ready(stream):
                     spotter.decode_stream(stream)
-                    if spotter.get_result(stream):
+                    hit = spotter.get_result(stream)
+                    if hit:
+                        print(f"[kws] HIT 「{hit}」", flush=True)
                         notify_wake()
                         spotter.reset_stream(stream)
 

@@ -1147,6 +1147,12 @@ def _transcribe_local(file_path: str, model_name: str) -> Dict[str, Any]:
         }
         if _forced_lang:
             transcribe_kwargs["language"] = _forced_lang
+        # Optional decoding bias (stt.local.initial_prompt) — e.g. a code-switch
+        # hint so forced-zh decoding still emits English terms ("Jarvis") instead
+        # of phonetic Chinese ("夏威士").
+        _initial_prompt = _load_stt_config().get("local", {}).get("initial_prompt")
+        if _initial_prompt:
+            transcribe_kwargs["initial_prompt"] = str(_initial_prompt)
 
         try:
             segments, info = _local_model.transcribe(file_path, **transcribe_kwargs)
