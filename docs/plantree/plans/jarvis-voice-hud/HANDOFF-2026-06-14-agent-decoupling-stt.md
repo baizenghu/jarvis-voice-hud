@@ -36,6 +36,10 @@ branch: feat/voice-hud-agent-orchestration
      - **部署**:中心起 `HOST=0.0.0.0 PORT=8011 JARVIS_GATEWAY_TOKEN=<tok> bash hud-app/start_voice_svc.sh`;`main.rs` INIT_SCRIPT 改读 env 三全局;0.3 `~/.jarvis-secrets` 加 `JARVIS_USE_HTTP_VOICE=1`/`JARVIS_VOICE_URL=http://10.8.0.2:8011`/`JARVIS_TOKEN=<tok>`;rsync 全量 hud/src+main.rs;`start_jarvis.sh` 重启(tauri 重编拾取)。
      - **证据**:G1 转写「你好,我是贾维斯。」名字归一化在、G2 WAV webview 直播 OK、G3 连续多轮无崩、G4 静音判没听清、G5 鉴权 401/200。判别器:旧路 whisper_api:8010 `[stt]` 计数全程停 40=确实走新路。GPU 双 whisper+cosyvoice 共存 9.3/12G 不 OOM。
      - **⚠️ flag 代码默认仍 false**(`voice_http.ts`);0.3 靠 secrets 注入启用。**别把代码默认改 true**——未注入 `__JARVIS_VOICE_URL__` 的 HUD 会把 voiceSvcBase 派生成网关地址(错)。改默认留到 step5 删 WS 路径时。**回退**:注释 0.3 secrets 三行 + 重启 HUD。
+   - **🩹 真机回归修复(2026-06-14,放歌时发现)**:
+     - **死锁**(`voice_http` fetch 无超时):voice_svc 卡顿→fetch 永挂→HUD 报 busy 不报 idle→网关僵 busy→唤醒全被挡→语音整死。修=`fetchWithTimeout`(STT 20s/TTS 45s)abort 降级。旧 WS 有兜底,fetch 路径漏了=回归。
+     - **停不掉刚点的歌**(duck 只在会话开始判一次):"先点歌再喊停"时点歌那刻无音乐→永不压低→"停止"被歌声盖住识别不出。修=duck 移进 `runSession` 每轮录音前按当前音乐态判(`SessionDeps.isMusicPlaying/duck`)。
+     - 两修都已 commit + rsync 0.3 + 重启 HUD 验证产物在跑(dist `Dl6QDzKV` 含 isMusicPlaying)。
    - **🔜 step5 contract**(可选,真机稳定一阵后独立 commit):删 WS 语音路径(`voice_bytes.py` 两函数、`gateway_voice_patch.py` 两注册、`server.py:8959/8989`、`rpc.ts` 旧分支 + flag 包装),顺带清 main.ts base64 往返,再把 flag 默认改 true。**本次未做,旧路径完整保留可回退。**
 2. 给中心 whisper_api 写一键启动脚本(现在手动,见⑥)。
 3. push 分支 / 决定 3 个 pre-existing 文件去留 / `ws_tool_smoke.py`(失效 dev 脚本)删否。
