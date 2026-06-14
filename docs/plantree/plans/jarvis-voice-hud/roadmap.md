@@ -1,14 +1,12 @@
 # 路线图:贾维斯语音 HUD
 
-> 🚀 **NEW SESSION 入口**:先读最新交接 [HANDOFF-2026-06-13-agent-orchestration.md](HANDOFF-2026-06-13-agent-orchestration.md)
-> ——**控制权倒转(agent 编排 + 薄客户端)Phase 0-3 在分支 `feat/voice-hud-agent-orchestration` 建好并验证**(0.3 全链路 smoke 3/3,
-> 工具接线修复 b8410e7),未合 main、未上真机;下一步 **Phase 4 真机部署家里 + 语音验收**。
-> 此前:Phase 3 免按住已家里真机验收(上篇 HANDOFF);Windows 2c M1-M3 过。
-> 红线:语义全交 agent(前端正则已废);工具须 monkeypatch `_load_enabled_toolsets`;杀端口 `fuser -k`;tar 连 hud/src;在 main 上提交先确认。
->
-> 🧭 **架构方向变更(2026-06-13)**:确立**与 agent 解耦** —— agent = 文本进 `{text,end}` 出黑盒,
-> 贾维斯只管 STT+TTS+HUD+loop,MCP/skill 全在 agent 内部。见 [decisions/0007](decisions/0007-agent-decoupling-text-blackbox.md)
-> (**取代** design-agent-orchestration 的 in-process 大脑)+ 迁移 TODO [impl-plan-agent-decoupling.md](impl-plan-agent-decoupling.md)。**设计已定稿,未开始实施。**
+> 🚀 **NEW SESSION 入口(2026-06-14)**:先读最新交接 [HANDOFF-2026-06-14-agent-decoupling-stt.md](HANDOFF-2026-06-14-agent-decoupling-stt.md)
+> ——**agent 解耦(决策 0007:agent=文本进 `{text,end}` 出)phase 0–4 全实现+提交+真机验过;STT 换 whisper large-v3-turbo
+> (快、抗噪);百度 STT 作可选 backend**。全在分支 `feat/voice-hud-agent-orchestration`(HEAD `6f1c8ac`,**未 push**)。
+> 下一步 = **STT 独立化(脱 hermes,像 cosyvoice)**,见 [impl-plan-agent-decoupling.md](impl-plan-agent-decoupling.md) phase 5。
+> 红线:push 等指令;改 0.3 先 rsync 全量 `hud/src`(含 `*.test.ts`);跑 pytest 用 `uv run --no-sync`(别 anaconda);杀进程按端口(别 `pkill -f`);在 main 提交先确认。
+> 架构真相见 [decisions/0007](decisions/0007-agent-decoupling-text-blackbox.md)(取代 in-process 大脑 + webview 音乐)。
+> _(旧入口:[HANDOFF-2026-06-13](HANDOFF-2026-06-13-agent-orchestration.md) 已被 06-14 篇取代)_
 
 持久的分期状态。每个阶段实现的架构见 [design.md](design.md)。
 
