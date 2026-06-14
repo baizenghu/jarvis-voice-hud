@@ -2,6 +2,7 @@
 // methods, same event handling (resolve pending replies on message.complete).
 
 import type { AgentReply } from "./session.ts";
+import { synthesizeHttp, transcribeHttp, useHttpVoice } from "./voice_http.ts";
 
 export interface TranscribeResult {
   text: string;
@@ -126,6 +127,11 @@ export class VoiceRpc {
   }
 
   async transcribe(audio: string, mime: string): Promise<string> {
+    // phase5: fetch the standalone voice service directly (flag default false →
+    // legacy WS path below, unchanged). New logic lives in voice_http.ts.
+    if (useHttpVoice()) {
+      return transcribeHttp(audio, mime);
+    }
     const tr = await this.rpc<TranscribeResult>("voice.transcribe", { audio, mime });
     if (tr.error) {
       this.onLog(`STT error: ${tr.error.message}`);
@@ -147,6 +153,9 @@ export class VoiceRpc {
   }
 
   async synthesize(text: string): Promise<SynthesizeResult | null> {
+    if (useHttpVoice()) {
+      return synthesizeHttp(text);
+    }
     const syn = await this.rpc<SynthesizeResult>("voice.synthesize", { text });
     if (syn.error) {
       this.onLog(`TTS error: ${syn.error.message}`);
