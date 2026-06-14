@@ -11,7 +11,8 @@ branch: feat/voice-hud-agent-orchestration
 **贾维斯 agent 解耦(决策 0007:agent=文本进 `{text,end}` 出黑盒)phase 0–4 全部实现+提交+真机验过;STT 换 whisper large-v3-turbo(快、抗噪,真机"哇塞");百度 STT 作可选 backend。** 全在分支 `feat/voice-hud-agent-orchestration`,**未 push**。下一步=用户约定的「STT 独立化(脱 hermes,像 cosyvoice)」后续整改。
 
 ## ② git + 持久状态
-- 分支 `feat/voice-hud-agent-orchestration`,HEAD `6f1c8ac`。**无 git remote → 13 个 commit 全未 push**(`0cab01c..HEAD`)。
+- 分支 `feat/voice-hud-agent-orchestration`,HEAD `01011ce`。**无 git remote → 全未 push**。
+  - `716fc87` docs(刷新路标)、**`01011ce` phase5 step1 STT 引擎脱 hermes**(`voice_svc_stt.py`+单测,见③)叠在 `6f1c8ac` 之上。
 - 关键 commit:`08f7e72`(决策0007+计划+规格)`3a1b4cc`(p0)`64f6c6b`(p1鉴权)`a3f4f97`(p2 sanitizer)`b5b1c96`+`21f4eff`(p3 expand+contract)`b3f77ec`(webview音乐退役)`766549c`(p4静默超时)`67e7444`(百度STT backend)`ac177e2`(百度噪声过滤)`d7e0f88`(回声过滤修)`6f1c8ac`(docs)。
 - **3 个 pre-existing 改动全程没碰**(非本人):`hud-app/kws_listener.py`、`hud-app/whisper_api.py`、`tools/transcription_tools.py`。
 - **部署态(不在 git,机器重启需重做)**:中心 `~/.hermes-stt/config.yaml` `model:`→ 本地 turbo 路径;turbo 模型在 `~/.cache/whisper-models/faster-whisper-large-v3-turbo`(魔搭下);`.venv` 装了 `modelscope`;0.3 `~/.jarvis-secrets`(百度密钥,600,`STT_BACKEND=baidu` 已注释=用 whisper);whisper_api 手动起的(见⑥)。
@@ -25,7 +26,11 @@ branch: feat/voice-hud-agent-orchestration
 
 ## ④ backlog(ROI 排序)+ 已关闭决策(负面清单)
 **下一步(按 ROI):**
-1. **STT 独立化**(用户约定的后续整改,详见 `impl-plan-agent-decoupling.md` phase 5):`whisper_api` 脱 `from tools.voice_mode`,重写成零 hermes 依赖的自包含 STT 服务(直接 faster-whisper turbo),**完整搬过质量门**(VAD、`is_whisper_hallucination`+中文幻觉名单、语气词过滤、`_JARVIS_ALIASES`),保留 `/v1/audio/transcriptions` 契约(0.3 不改),`STT_BACKEND` 选择器收进服务,独立 venv/目录。**做法:与现 whisper_api 并存→转写对等验证→切(expand-contract,别一把梭)。**
+1. **STT 独立化**(用户约定的后续整改,详见 `impl-plan-agent-decoupling.md` phase 5 + `specs/phase5-voice-service.md`):重写成零 hermes 依赖的自包含 STT 服务(直接 faster-whisper turbo),**完整搬过质量门**(VAD、`is_whisper_hallucination`+中文幻觉名单、`_JARVIS_ALIASES`;语气词过滤是 baidu_stt 专属、whisper 路径靠 VAD),保留契约,`STT_BACKEND` 选择器收进服务。**expand-contract,flag 默认 false 零风险回退。**
+   - **✅ step1(`01011ce`)**:`hud-app/voice_svc_stt.py`(引擎,A/B/C/D 全搬,配置改 env STT_MODEL/STT_LANGUAGE/STT_INITIAL_PROMPT)+ `tests/test_voice_svc_stt.py`。验:pytest 6 passed;grep 无 hermes import;import 零拉入 hermes 模块;faster_whisper 懒加载。
+   - **🔜 step2**:`hud-app/voice_svc.py`(HTTP 层 `/health`/`/transcribe`/`/synthesize` + 鉴权(裸路径,**别照抄 dev_server 只守 /api/ 的 middleware**)+ CORS(Tauri origin,regex)+ TTS 转发到 cosyvoice_server:8003 不重复毒化补偿)+ `tests/test_voice_svc_http.py` + `start_voice_svc.sh`。
+   - **🔜 step3**:前端 `voice_http.ts`(+测)+ `rpc.ts` 最小双路桩(flag 默认 false,新逻辑全进 voice_http.ts,与 phase3 改的 submitPrompt 物理隔开)。
+   - **🔜 step4**:真机翻 flag(前置 unknown:中心 GPU 部署形态/直连地址/显存,见 spec §9);**step5 contract 删 WS 语音路径**留真机稳定后独立 commit。
 2. 给中心 whisper_api 写一键启动脚本(现在手动,见⑥)。
 3. push 分支 / 决定 3 个 pre-existing 文件去留 / `ws_tool_smoke.py`(失效 dev 脚本)删否。
 4. phase 6(抢话打断/流式/进度/agent 主动说话)——需先解 AEC double-talk。
