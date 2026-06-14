@@ -60,6 +60,18 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
+// 🔴 必须有超时:没有它,voice_svc 一旦卡顿(GPU 争用/长音乐 double-talk),fetch 永不返回
+// → runSession 永久 await → HUD 报了 busy 却从不报 idle → 网关僵 busy → 全部唤醒被挡 →
+// 语音整个死掉(真机踩过)。超时后 abort,请求失败降级(回 ""/null),会话照常收尾。
+const STT_TIMEOUT_MS = 20_000;  // 正常 STT <3s;>20s 视为卡死,降级
+const TTS_TIMEOUT_MS = 45_000;  // CosyVoice _infer_lock 串行可能排队;给足但有界
+
+function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+}
+
 // transcribe: accept the base64 the rpc layer already has (approach a), POST it
 // as multipart so the service gets raw bytes. Any failure → "" (same "no speech
 // detected" degradation as the WS path: rpc.ts:130-134).
@@ -68,10 +80,10 @@ export async function transcribeHttp(audioB64: string, mime: string): Promise<st
     const blob = new Blob([base64ToBytes(audioB64)], { type: mime });
     const fd = new FormData();
     fd.append("file", blob, `audio.${suffixFor(mime)}`);
-    const resp = await fetch(`${voiceSvcBase()}/transcribe${tokenQuery()}`, {
+    const resp = await fetchWithTimeout(`${voiceSvcBase()}/transcribe${tokenQuery()}`, {
       method: "POST",
       body: fd,
-    });
+    }, STT_TIMEOUT_MS);
     if (!resp.ok) {
       return "";
     }
@@ -88,11 +100,11 @@ export async function transcribeHttp(audioB64: string, mime: string): Promise<st
 // rpc.ts:151-155 parity).
 export async function synthesizeHttp(text: string): Promise<SynthesizeResult | null> {
   try {
-    const resp = await fetch(`${voiceSvcBase()}/synthesize${tokenQuery()}`, {
+    const resp = await fetchWithTimeout(`${voiceSvcBase()}/synthesize${tokenQuery()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
-    });
+    }, TTS_TIMEOUT_MS);
     if (!resp.ok) {
       return null;
     }

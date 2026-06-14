@@ -19,7 +19,18 @@ function stubWindow(w: Win): void {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
+
+// A fetch stub that never resolves but honors AbortSignal (simulates a stalled
+// voice_svc — the exact condition that wedged the HUD: no timeout = infinite await).
+function hangingFetch() {
+  return vi.fn((_url: string, init: RequestInit) =>
+    new Promise((_res, rej) => {
+      init.signal?.addEventListener("abort", () =>
+        rej(new DOMException("aborted", "AbortError")));
+    }));
+}
 
 describe("useHttpVoice", () => {
   it("defaults to false when the flag is unset", () => {
@@ -111,5 +122,25 @@ describe("synthesizeHttp", () => {
     stubWindow({ __JARVIS_VOICE_URL__: "http://c:8011" });
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network")));
     expect(await synthesizeHttp("好的")).toBeNull();
+  });
+});
+
+describe("fetch timeout (no infinite hang on a stalled voice_svc)", () => {
+  it("transcribeHttp aborts and returns '' when the request stalls", async () => {
+    vi.useFakeTimers();
+    stubWindow({ __JARVIS_VOICE_URL__: "http://c:8011" });
+    vi.stubGlobal("fetch", hangingFetch());
+    const p = transcribeHttp("QUJD", "audio/webm");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await p).toBe("");
+  });
+
+  it("synthesizeHttp aborts and returns null when the request stalls", async () => {
+    vi.useFakeTimers();
+    stubWindow({ __JARVIS_VOICE_URL__: "http://c:8011" });
+    vi.stubGlobal("fetch", hangingFetch());
+    const p = synthesizeHttp("好的");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await p).toBeNull();
   });
 });
