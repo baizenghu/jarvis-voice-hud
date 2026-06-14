@@ -15,6 +15,8 @@ function stubDeps(over: Partial<SessionDeps>): SessionDeps {
     timeoutMs: 30000,
     now: () => 0,
     idleTimeoutMs: Number.MAX_SAFE_INTEGER,
+    isMusicPlaying: () => false,
+    duck: () => {},
   };
   return { ...base, ...over };
 }
@@ -82,6 +84,73 @@ describe("runSession (agent boundary = {text, end})", () => {
     await vi.runAllTimersAsync();
     await p;
     expect(calls).toEqual(["speak:<greeting>", "speak:没听清,再说一次?", "speak:好,我退下了"]);
+  });
+});
+
+describe("runSession 音乐 duck(先点歌再喊停)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("音乐在放时:录命令前 duck、会话结束 restore(能停掉刚点的歌)", async () => {
+    const events: string[] = [];
+    let turn = 0;
+    const d = stubDeps({
+      isMusicPlaying: () => true,
+      duck: (on) => events.push(on ? "duck-on" : "duck-off"),
+      listen: async () => {
+        events.push("listen");
+        return turn++ === 0 ? "停止" : "退下";
+      },
+      submitPrompt: async () => ({ text: "好的", end: true }),
+    });
+    await runSession(d);
+    // duck 必须在第一次录音前打开
+    expect(events[0]).toBe("duck-on");
+    expect(events.indexOf("duck-on")).toBeLessThan(events.indexOf("listen"));
+    // 会话结束恢复音量,且只 duck/restore 一次
+    expect(events[events.length - 1]).toBe("duck-off");
+    expect(events.filter((e) => e === "duck-on")).toHaveLength(1);
+    expect(events.filter((e) => e === "duck-off")).toHaveLength(1);
+  });
+
+  it("没放音乐时不 duck(不无谓压音量)", async () => {
+    const events: string[] = [];
+    const d = stubDeps({
+      isMusicPlaying: () => false,
+      duck: (on) => events.push(on ? "on" : "off"),
+      listen: async () => "退下",
+      submitPrompt: async () => ({ text: "bye", end: true }),
+    });
+    await runSession(d);
+    expect(events).toEqual([]);
+  });
+
+  it("点歌那轮无音乐→不 duck;下一轮音乐已放→录'停止'前 duck", async () => {
+    const events: string[] = [];
+    let turn = 0;
+    let musicOn = false;
+    const d = stubDeps({
+      isMusicPlaying: () => musicOn,
+      duck: (on) => events.push(on ? "duck-on" : "duck-off"),
+      listen: async () => {
+        events.push(`listen${turn}`);
+        return turn === 0 ? "放夜曲" : "停止";
+      },
+      submitPrompt: async (text) => {
+        turn++;
+        if (text === "放夜曲") {
+          musicOn = true; // agent 放起歌,音乐态变真
+          return { text: "好的", end: false };
+        }
+        return { text: "停了", end: true };
+      },
+    });
+    await runSession(d);
+    // 第一轮(点歌)无音乐→listen0 前不 duck;第二轮音乐已放→listen1 前 duck
+    expect(events.indexOf("duck-on")).toBeGreaterThan(events.indexOf("listen0"));
+    expect(events.indexOf("duck-on")).toBeLessThan(events.indexOf("listen1"));
+    expect(events[events.length - 1]).toBe("duck-off");
   });
 });
 

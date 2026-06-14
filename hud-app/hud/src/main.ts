@@ -327,10 +327,8 @@ async function wakeSession(): Promise<void> {
     return;
   }
   conversing = true;
-  const duckedMusic = musicPlaying();
-  if (duckedMusic) {
-    duckMusic(true); // 对话期间压低音乐,STT 才听得清
-  }
+  // duck 现由 runSession 在"每轮录音前按当前音乐态"决定(修"先点歌再喊停":点歌那刻
+  // 还没音乐,旧的会话开始判一次永不压低 → 歌声盖住"停止")。
   await runSession({
     listen: autoListen,
     submitPrompt: (text) => rpc.submitPrompt(text),
@@ -342,10 +340,9 @@ async function wakeSession(): Promise<void> {
     timeoutMs: SESSION_TIMEOUT_MS,
     now: () => performance.now(),
     idleTimeoutMs: IDLE_TIMEOUT_MS,
+    isMusicPlaying: () => musicPlaying(),
+    duck: duckMusic,
   }).catch((e) => log(`session err: ${(e as Error).message}`));
-  if (duckedMusic) {
-    duckMusic(false); // 会话结束恢复音量(若已停止则无害)
-  }
   conversing = false;
 }
 
