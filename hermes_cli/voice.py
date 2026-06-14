@@ -754,7 +754,6 @@ def speak_text(text: str) -> None:
     if not text or not text.strip():
         return
 
-    import re
     import tempfile
     import time
 
@@ -781,18 +780,12 @@ def speak_text(text: str) -> None:
     try:
         from tools.tts_tool import text_to_speech_tool
 
+        # Shared with the HUD's synthesize_bytes (decisions/0007 phase 2) —
+        # single source of truth for stripping markdown/URLs before TTS.
+        from tools.tts_sanitize import sanitize_for_speech
+
         tts_text = text[:4000] if len(text) > 4000 else text
-        tts_text = re.sub(r'```[\s\S]*?```', ' ', tts_text)             # fenced code blocks
-        tts_text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', tts_text)    # [text](url) → text
-        tts_text = re.sub(r'https?://\S+', '', tts_text)                # bare URLs
-        tts_text = re.sub(r'\*\*(.+?)\*\*', r'\1', tts_text)            # bold
-        tts_text = re.sub(r'\*(.+?)\*', r'\1', tts_text)                # italic
-        tts_text = re.sub(r'`(.+?)`', r'\1', tts_text)                  # inline code
-        tts_text = re.sub(r'^#+\s*', '', tts_text, flags=re.MULTILINE)  # headers
-        tts_text = re.sub(r'^\s*[-*]\s+', '', tts_text, flags=re.MULTILINE)  # list bullets
-        tts_text = re.sub(r'---+', '', tts_text)                        # horizontal rules
-        tts_text = re.sub(r'\n{3,}', '\n\n', tts_text)                  # excess newlines
-        tts_text = tts_text.strip()
+        tts_text = sanitize_for_speech(tts_text)
         if not tts_text:
             return
 

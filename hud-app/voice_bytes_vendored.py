@@ -14,6 +14,7 @@ import tempfile
 from typing import Tuple
 
 from tools.tts_tool import text_to_speech_tool
+from tools.tts_sanitize import sanitize_for_speech
 from tools.voice_mode import transcribe_recording
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,13 @@ def synthesize_bytes(text: str) -> Tuple[bytes, str]:
     falls back to showing the reply as text only.
     """
     if not text or not text.strip():
+        return b"", ""
+
+    # Strip markdown/URLs before TTS (decisions/0007 phase 2): the agent's raw
+    # reply must not be read aloud with markup. Re-check empty — a reply that is
+    # nothing but markup sanitizes away → skip synthesis (caller shows text).
+    text = sanitize_for_speech(text)
+    if not text:
         return b"", ""
 
     fd, mp3_path = tempfile.mkstemp(suffix=".mp3", prefix="synth_")

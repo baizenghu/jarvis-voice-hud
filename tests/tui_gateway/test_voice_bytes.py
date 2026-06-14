@@ -5,6 +5,16 @@ from pathlib import Path
 import tui_gateway.voice_bytes as vb
 
 
+def test_vendored_copy_is_byte_identical():
+    # hud-app/voice_bytes_vendored.py is a dormant fallback for upstream Windows
+    # installs that lack the tui_gateway package; it must stay in sync with the
+    # real module so a change here can't silently skip the vendored path.
+    root = Path(__file__).resolve().parents[2]
+    fork = (root / "tui_gateway" / "voice_bytes.py").read_text()
+    vendored = (root / "hud-app" / "voice_bytes_vendored.py").read_text()
+    assert fork == vendored, "voice_bytes.py and voice_bytes_vendored.py drifted"
+
+
 def test_synthesize_bytes_reads_engine_output(monkeypatch, tmp_path):
     # Fake the TTS engine: write known bytes to the requested output_path,
     # return the JSON envelope the real text_to_speech_tool returns.
@@ -32,6 +42,42 @@ def test_synthesize_bytes_empty_text_returns_empty(monkeypatch):
     monkeypatch.setattr(vb, "text_to_speech_tool", fake_tts)
 
     audio, mime = vb.synthesize_bytes("   ")
+
+    assert audio == b""
+    assert called is False
+
+
+def test_synthesize_bytes_sanitizes_before_engine(monkeypatch):
+    # The HUD's voice.synthesize path must strip markdown before TTS so a
+    # chatty agent's "**" / "`" are not read aloud. Assert the EXACT text the
+    # engine receives, not just absence of a character.
+    seen = {}
+
+    def fake_tts(text, output_path=None):
+        seen["text"] = text
+        Path(output_path).write_bytes(b"ID3x")
+        return json.dumps({"success": True, "file_path": output_path})
+
+    monkeypatch.setattr(vb, "text_to_speech_tool", fake_tts)
+
+    vb.synthesize_bytes("念**这个**")
+
+    assert seen["text"] == "念这个"
+
+
+def test_synthesize_bytes_sanitized_to_empty_skips_engine(monkeypatch):
+    # Input that is nothing but markup sanitizes to empty → must not call the
+    # engine (which would otherwise produce an empty file → RPC error 5028).
+    called = False
+
+    def fake_tts(text, output_path=None):
+        nonlocal called
+        called = True
+        return "{}"
+
+    monkeypatch.setattr(vb, "text_to_speech_tool", fake_tts)
+
+    audio, mime = vb.synthesize_bytes("```\ncode\n```")
 
     assert audio == b""
     assert called is False
