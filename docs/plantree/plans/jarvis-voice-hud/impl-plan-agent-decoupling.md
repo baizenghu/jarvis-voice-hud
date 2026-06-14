@@ -140,11 +140,16 @@
   ⑦ flag 回退(`=false` 行为同今日)。
 
 ## 阶段 4 —— 双路回待机
-- [ ] 路①:agent `end=true` → 念完 `text` 再回待机。
-- [ ] 路②:**空闲超时**——仅在"轮已结束、等用户开口"时计时;N 秒静音 → 回待机;
-      agent 长任务未返回时不计时。
-- [ ] 对齐跨进程超时常量(前端 `SESSION_TIMEOUT_MS` 与后端 `BUSY_MAX_S=240`)。
-- [ ] 真机验收:喊"贾维斯"→对话→"退下"立即退场;不说话→空闲超时自动退场;长任务期间不误退。
+- [x] 路①:agent `end=true` → 念完 `text` 再回待机(随 phase 3 落地)。
+- [x] 路②:**空闲超时**(2026-06-14,TDD,前端 only)。`session.ts` 加 `now()` 单一时间源 + `idleTimeoutMs`;
+      `runSession` 在 `listen()==null` 分支查 `now()-lastSpeechAt >= idleTimeoutMs` → 退场。**基线 `lastSpeechAt`
+      只在"轮真正结束后"复位**(Codex:不在转写到达时,否则慢 submitPrompt 误判);长任务在 text 分支、不入静默计时。
+      `main.ts` `IDLE_TIMEOUT_MS=30000` + `now: performance.now`。测试 3 例(静默退 / 说话重置基线 / 长任务不误退),
+      vitest 21 passed + tsc/build 0,后端无关。
+- [x] 对齐跨进程超时常量:`IDLE_TIMEOUT_MS=30s` ≪ `SESSION_TIMEOUT_MS=180s` < `BUSY_MAX_S=240s`;空闲退场让 busy 更早清,
+      不破坏关系(已在代码注释记)。
+- [ ] **真机验收(你来)**:喊"贾维斯"→"退下"立即退场(路①,已验过);不说话→约 30s 后自动退场(路②);
+      长任务(查 skill/跑 terminal)期间不被误退。
 
 ## 阶段 5 —— 语音服务独立(difficulty 3,云 backend 留口不实现)
 - [ ] `whisper_api` 重写成不依赖 `tools.voice_mode` 的独立 STT 服务,**完整搬过** large-v3 + VAD +

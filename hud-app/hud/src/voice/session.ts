@@ -21,6 +21,8 @@ export interface SessionDeps {
   sleep: (ms: number) => Promise<void>; // 注入便于 fake-timers 推进
   pickGreeting: () => string;
   timeoutMs: number;
+  now: () => number; // 单一时间源(注入便于 fake-timer 测静默超时)
+  idleTimeoutMs: number; // 路②:轮结束后持续静默超此 → 自动退场
 }
 
 const TIMEOUT = Symbol("timeout");
@@ -45,20 +47,29 @@ export async function runSession(d: SessionDeps): Promise<void> {
     // 招呼套硬超时:即便 TTS 合成/播放卡住或抛错,也必走到 finally 清 busy,
     // 否则一次卡死会让网关永远停在 busy、之后所有唤醒被拒。
     await withTimeout(d.speak(d.pickGreeting()), d.timeoutMs, d.sleep);
+    // 路②静默超时基线:招呼后开始计;**只在"轮真正结束后"复位**(不在转写到达时),
+    // 否则慢的 submitPrompt 会让下一个静默窗误判超时。长任务期间不在 listen==null 分支,
+    // 自然不计入静默。
+    let lastSpeechAt = d.now();
     for (;;) {
       const text = await d.listen(); // 复用现有录音/VAD/回声/静音逻辑
       if (text == null) {
-        continue; // 无人声/回声:继续听(结束由 agent 的 reply.end 决定)
+        if (d.now() - lastSpeechAt >= d.idleTimeoutMs) {
+          break; // 路②:轮后持续静默 → 自动退场(无需 agent end)
+        }
+        continue; // 仍在静默窗内:继续听(结束由 agent reply.end 或本超时决定)
       }
       const reply = await withTimeout(d.submitPrompt(text), d.timeoutMs, d.sleep);
       if (reply === TIMEOUT) {
         await withTimeout(d.speak("没听清,再说一次?"), d.timeoutMs, d.sleep);
-        continue; // 超时不算结束,继续听
+        lastSpeechAt = d.now(); // 用户有说话(只是没答上)→ 算交互,重置静默基线
+        continue;
       }
       await withTimeout(d.speak(reply.text), d.timeoutMs, d.sleep); // 念回复(超时也不卡)
       if (reply.end) {
-        break; // 先念完 text 再退出 → 先念完告别再隐身
+        break; // 路①:先念完 text 再退出 → 先念完告别再隐身
       }
+      lastSpeechAt = d.now(); // 轮真正结束后才复位静默基线
     }
   } finally {
     d.setHudVisible(false);

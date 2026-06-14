@@ -244,6 +244,9 @@ const WAKE_MAX_MS = 15000; // hard cap per listening window
 const WAKE_LEVEL = 0.08;
 const SESSION_TIMEOUT_MS = 180000; // agent reply timeout → 念提示再听。设 3 分钟,给工具
 // 任务(看 skill + 跑 terminal,MiniMax 推理可达数十秒)充足时间,不被砍成"没听清"。
+// 路②:一轮结束后持续静默超此 → 自动退场(没人理就回待机)。远 < BUSY_MAX_S(240s)
+// 与 SESSION_TIMEOUT_MS(180s),会让会话更早结束、busy 更早清,不破坏跨进程超时关系。
+const IDLE_TIMEOUT_MS = 30000;
 const GREETINGS = ["我在,请讲。", "在的,有什么吩咐?", "先生,随时待命。", "你好 BOSS,我是贾维斯,有什么可以为你效劳?"];
 
 let conversing = false;
@@ -334,6 +337,8 @@ async function wakeSession(): Promise<void> {
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     pickGreeting: () => GREETINGS[Math.floor(Math.random() * GREETINGS.length)],
     timeoutMs: SESSION_TIMEOUT_MS,
+    now: () => performance.now(),
+    idleTimeoutMs: IDLE_TIMEOUT_MS,
   }).catch((e) => log(`session err: ${(e as Error).message}`));
   if (duckedMusic) {
     duckMusic(false); // 会话结束恢复音量(若已停止则无害)
